@@ -1,0 +1,1472 @@
+#!/usr/bin/env python
+#
+#This file is part of "jiffy".
+#
+#Project: jiffy: A product for building and managing infrastructure: 
+#cloud provider services, and servers and their configurations.
+#
+#Description: A product for building and managing infrastructure. 
+#This includes third party API calls for services such as virtual
+#cloud servers, load balancers, databases, and other. The product 
+#manages connectivity and appropriate communication among these 
+#aws.
+#
+#Copyright (C) Gary Leong - All Rights Reserved
+#Unauthorized copying of this file, via any medium is strictly prohibited
+#Proprietary and confidential
+#Written by Gary Leong  <gwleong@gmail.com, June 17,2023
+
+import os
+import json
+import sys
+from time import sleep
+from ast import literal_eval
+#from timeout import timeout
+
+from config0_publisher.loggerly import Config0Logger
+from config0_publisher.resource_manage import ResourceCmdHelper
+from config0_publisher.cloud.aws.codebuild import CodebuildResourceHelper
+from config0_publisher.serialization import b64_decode
+from config0_publisher.serialization import b64_encode
+from config0_publisher.resource_manage import to_jsonfile
+from config0_publisher.utilities import id_generator
+
+
+class Config0ResourceTFVars(object):
+
+    def __init__(self):
+
+        self.classname = 'Config0ResourceTFVars'
+
+        self.tf_settings = {}  # => resource_settings -> tf_settings
+
+        self.tf_exec_skip_keys = [ "sensitive_attributes",
+                                   "ses_smtp_password_v4" ]
+
+        self.tf_output_skip_keys = [ "tags",
+                                     "label",
+                                     "tag",
+                                     "_id",
+                                     "resource_type",
+                                     "provider",
+                                     "labels"]
+
+        self.tf_exec_include_raw = None
+        self.tf_exec_add_keys = []
+
+        self.tf_exec_remove_keys = [ "private", 
+                                     "secret"]
+
+        self.do_not_display = [ "AWS_SECRET_ACCESS_KEY",
+                                "secret" ]
+
+        self.tf_exec_map_keys = {}
+
+        self.tf_exec_state_file = os.environ.get("TF_EXEC_STATE_FILE",
+                                                 "terraform.tfstate")
+
+        self.add_resource_inputargs = {}
+        self.resource_settings = {}
+        self.runtime_settings = {} # => resource_settings -> runtime_settings (docker)
+        self.resource_values = None
+        self.resource_labels = None
+        self.resource_type = None
+        self.provider = None
+
+        self.std_labels_keys = [ "region",
+                                 "provider",
+                                 "source_method",
+                                 "resource_type" ]
+
+        # set config0 resource settings
+        self._init_config0_resource_settings()
+
+    # only use for creation
+    def _set_tf_settings(self):
+
+        try:
+            self.tf_settings = self.resource_settings["terraform"]
+        except:
+            self.tf_settings = {}
+
+        if not self.tf_settings:
+            return
+
+        self.terraform_type = self.tf_settings.get("terraform_type")
+
+        # ResourceCmdHelper is not terraform aware
+        # so we map it resource accordingly
+        if self.tf_settings.get("tf_exec_postscript_path"):
+            self.postscript_path = self.tf_settings["tf_exec_postscript_path"]
+        elif self.tf_settings.get("tf_exec_postscript"):
+            self.postscript = self.tf_settings["tf_exec_postscript"]
+            self.postscript_path = os.path.join(self.exec_dir,
+                                                self.postscript)
+
+    # only use for creation
+    def _set_runtime_settings(self):
+
+        self.runtime_env_vars = {}
+
+        include_env_vars_keys = None
+
+        if self.runtime_settings:
+
+            env_vars = self.runtime_settings.get("env_vars")
+
+            if env_vars:
+                for _k,_v in env_vars.items():
+                    self.runtime_env_vars[_k.upper()] = _v
+
+            include_env_vars_keys = self.runtime_settings.get("include_env_vars_keys")
+
+        if not include_env_vars_keys:
+            return
+
+        for docker_env_field in include_env_vars_keys:
+
+            _var = docker_env_field.strip().upper()
+
+            # check on upper case
+            if not os.environ.get(_var):
+                continue
+
+            if _var in self.runtime_env_vars:
+                continue
+
+            self.runtime_env_vars[_var] = os.environ[_var]
+
+    def _init_config0_resource_settings(self):
+
+        # unpackage config0 resource settings
+        try:
+            self.resource_settings = b64_decode(self.inputargs.get("config0_resource_settings_hash"))
+        except:
+            self.resource_settings = {}
+
+        if not self.resource_settings:
+
+            try:
+                self.resource_settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
+            except:
+                self.resource_settings = {}
+
+        if not self.resource_settings:
+            return
+
+        self.resource_values = self.resource_settings.get("resource_values")
+        self.resource_labels = self.resource_settings.get("resource_labels")
+        self.resource_type = self.resource_settings.get("resource_type")
+        self.provider = self.resource_settings.get("provider")
+        env_vars = self.resource_settings.get("env_vars")
+
+        if not self.resource_type:
+            failed_message = "resource_type needs to be set: resource_settings {}".format(self.resource_settings)
+            raise Exception(failed_message)
+
+        if not self.provider:
+            self.logger.error("provider should be set: resource_settings {}".format(self.resource_settings))
+
+        # set docker settings
+        try:
+            # ref 4353453246
+            self.runtime_settings = self.resource_settings["runtime"]
+        except:
+            self.runtime_settings = {}
+
+        if not self.runtime_settings:
+
+            try:
+                self.runtime_settings = b64_decode(os.environ.get("CONFIG0_RUNTIME_SETTINGS_HASH"))
+            except:
+                self.runtime_settings = None
+
+        self._set_runtime_settings()
+
+        # set terraform settings
+        self._set_tf_settings()
+
+    def _get_tfstate_file(self):
+
+        # read output file
+        with open(self.tf_exec_state_file) as json_file:
+            data = json.load(json_file)
+        
+        if not data:
+            msg = 'tfstate_to_output: there is no data from {}'.format(os.path.join(os.getcwd(),
+                                                                       self.tf_exec_state_file))
+            self.logger.debug(msg)
+
+            return 
+
+        return data
+
+    def _insert_resource_values(self,values):
+
+        self.logger.debug("tfstate_to_output: resource_values {}".format(self.resource_values))
+        
+        if not self.resource_values:
+            return 
+
+        for _k,_v in self.resource_values.items():
+
+            self.logger.debug('tfstate_to_output: resource values key "{}" -> value "{}"'.format(_k,
+                                                                                                 _v))
+            values[_k] = _v
+
+    # duplicate wertqttetqwetwqtqwt
+    def _insert_standard_resource_labels(self,values):
+
+        for key in self.std_labels_keys:
+
+            if not values.get(key):
+                self.logger.debug('source standard label key "{}" not found'.format(key))
+                continue
+
+            label_key = "label-{}".format(key)
+
+            if values.get(label_key):
+                self.logger.debug('label key "{}" already found'.format(label_key))
+                continue
+
+            values[label_key] = values[key]
+
+    def _insert_resource_labels(self,values):
+
+        if not self.resource_labels: 
+            return
+
+        for _k,_v in self.resource_labels.items():
+            self.logger.debug('tfstate_to_output: resource labels key "{}" -> value "{}"'.format("label-{}".format(_k),
+                                                                                                 _v))
+            values["label-{}".format(_k)] = _v
+
+    def _insert_tf_outputs(self,values):
+    
+        try:
+            outputs = self.data["outputs"]
+        except:
+            outputs = None
+
+        if not outputs: 
+            return
+
+        # put outputs in 
+        for k,v in outputs.items():
+    
+            # skip certain keys
+            if k in self.tf_output_skip_keys:
+                continue
+
+            # already set and exists
+            if values.get(k):
+                continue
+    
+            values[k] = v['value']
+
+    def _insert_tf_raw(self,values):
+        
+        if not self.tf_exec_include_raw:
+            return
+
+        if self.data:
+            data = self.data
+        else:
+            data = self._get_tfstate_file()
+
+        self.logger.debug("tfstate_to_output: include raw = True")
+
+        values["raw"] = {"terraform":b64_encode(data)}
+
+    def _insert_tf_add_keys(self,values):
+
+        for resource in self.data["resources"]:
+    
+            if resource["type"] != self.terraform_type:
+                continue
+
+            self.logger.debug("-" * 32)
+            self.logger.debug("tfstate_to_output: instance attribute keys")
+            self.logger.debug(list(resource["instances"][0]["attributes"].keys()))
+            self.logger.debug("-" * 32)
+
+            for instance in resource["instances"]:
+
+                for _key,_value in resource["instances"][0]["attributes"].items():
+    
+                    if not _value:
+                        continue
+
+                    if _key in values: 
+                        continue
+
+                    if _key in self.tf_exec_skip_keys: 
+                        self.logger.debug('tfstate_to_output/tf_exec_skip_keys: tf instance attribute key "{}" skipped'.format(_key))
+                        continue
+    
+                    # we add if tf_exec_add_key not set, all, or key is in it 
+                    if not self.tf_exec_add_keys:
+                        _added_bc = "tfstate_to_output/tf_exec_add_keys=None"
+                    elif self.tf_exec_add_keys == "all":
+                        _added_bc = "tfstate_to_output/tf_exec_add_keys=all"
+                    elif _key in self.tf_exec_add_keys:
+                        _added_bc = "tfstate_to_output/tf_exec_add_keys/key{} found".format(_key)
+                    else:
+                        _added_bc = None
+
+                    if not _added_bc:
+                        self.logger.debug("tfstate_to_output/tf_exec_add_keys: key {} skipped".format(_key))
+                        continue
+
+                    self.logger.debug('{}: tf key "{}" -> value "{}" added to resource values'.format(_added_bc,
+                                                                                                      _key,
+                                                                                                      _value))
+
+                    if isinstance(_value,list):
+                        try:
+                            values[_key] = ",".join(_value)
+                        except:
+                            values[_key] = _value
+                    elif isinstance(_value,dict):
+                        try:
+                            values[_key] = json.dumps(_value)
+                        except:
+                            values[_key] = _value
+                    else:
+                        values[_key] = _value
+                break
+
+    def _insert_tf_remove_keys(self,values):
+
+        if not self.tf_exec_remove_keys:
+            return
+
+        self.add_resource_inputargs["remove_keys"] = self.tf_exec_remove_keys
+        self.add_resource_inputargs["encrypt_fields"] = [ "raw" ]  # raw is appended to encrypted fields
+
+        return 
+
+    def _insert_tf_map_keys(self,values):
+
+        self.logger.debug("#"*32)
+        self.logger.debug("tfstate_to_output: tf_exec_map_keys")
+        self.logger.json(self.tf_exec_map_keys)
+        self.logger.debug("#"*32)
+
+        if not self.tf_exec_map_keys:
+            return
+
+        for _insertkey,_refkey in self.tf_exec_map_keys.items():
+
+            # _insertkey = "p1"
+            # _refkey = "q1"
+
+            # _insertkey = values
+            # _refkey = {"a":"b","c":"d"}
+            # values["values"]["a"] = values["b"]
+
+            if values.get(_insertkey):
+                self.logger.warn("tfstate_to_output: mapped key {} already exists - clobbering".format(_insertkey))
+                #continue
+    
+            # see if _refkey is a subkey
+            if isinstance(_refkey,dict):
+
+                if not values.get(_insertkey):
+                    values[_insertkey] = {}
+    
+                for _sub_insertkey,_sub_refkey in _refkey.items():
+    
+                    if not values.get(_sub_refkey):
+                        self.logger.debug('tfstate_to_output: mapped key sub_insertkey {} sub_refkey {} not found'.format(_sub_insertkey,
+                                                                                                                          _sub_refkey))
+                    # revisit 432523543245
+                    # ref 432523543245
+                    # do we want to nest 2 levels deep?
+                    if "," in values[_sub_refkey]:
+                        _sub_insertkey2,_subrefkey2 = values[_sub_refkey].split(",")
+
+                        if _sub_insertkey2 not in self.do_not_display:
+                            self.logger.debug('tfstate_to_output: mapped key ["{}"]["{}"]["{}"] -> value "{}"'.format(_insertkey,
+                                                                                                                      _sub_insertkey,
+                                                                                                                      _sub_insertkey2,
+                                                                                                                      values[_sub_refkey.strip()][_subrefkey2.strip()]))
+
+                        values[_insertkey][_sub_insertkey] = values[_sub_refkey.strip()][_subrefkey2.strip()]
+
+                    else:
+                        if _sub_insertkey not in self.do_not_display:
+                            self.logger.debug('tfstate_to_output: mapped key ["{}"]["{}"] -> value "{}"'.format(_insertkey,
+                                                                                                                _sub_insertkey,
+                                                                                                                values[_sub_refkey.strip()]))
+
+                        values[_insertkey][_sub_insertkey] = values[_sub_refkey]
+    
+            elif values.get(_refkey):
+                if _refkey not in self.do_not_display:
+                    self.logger.debug('tfstate_to_output: mapped key ["{}"] -> value "{}"'.format(_insertkey,_refkey))
+
+                values[_insertkey] = values[_refkey]
+
+            elif not values.get(_refkey):
+                self.logger.warn('tfstate_to_output: mapped key not found insertkey "{}" refkey "{}"'.format(_insertkey,
+                                                                                                             _refkey))
+
+    def _tfstate_to_output(self):
+        
+        self.data = self._get_tfstate_file()
+
+        if not self.data:
+            self.logger.debug("u4324: no data to retrieved from statefile")
+            return False
+        
+        self.logger.debug("u4324: retrieved data from statefile")
+
+        values = { "terraform_type":self.terraform_type,
+                   "resource_type":self.resource_type,
+                   "source_method":"terraform",
+                   "provider":self.provider,
+                   "main":True }
+        
+        self._insert_resource_values(values)
+
+        # special case of ssm_name/secrets
+        if self.ssm_name:
+            values["ssm_name"] = self.ssm_name
+
+        try:
+            self._insert_resource_labels(values)
+        except:
+            self.logger.warn("_insert_resource_labels failed")
+
+        try:
+            self._insert_tf_raw(values)
+        except:
+            self.logger.warn("_insert_tf_raw b64 failed")
+
+        try:
+            self._insert_tf_outputs(values)
+        except:
+            self.logger.warn("_insert_tf_outputs failed")
+
+        try:
+            self._insert_tf_add_keys(values)
+        except:
+            self.logger.warn("_insert_tf_add_keys failed")
+
+        try:
+            self._insert_tf_map_keys(values)
+        except:
+            self.logger.warn("_insert_tf_map_keys failed")
+
+        try:
+            self._insert_standard_resource_labels(values)
+        except:
+            self.logger.warn("_insert_standard resource labels failed")
+
+        try:
+            self._insert_tf_remove_keys(values)
+        except:
+            self.logger.warn("_insert_tf remove keys failed")
+
+        return values
+        
+class Main(ResourceCmdHelper,Config0ResourceTFVars):
+
+    def __init__(self,**kwargs):
+
+        '''
+
+        # ref 4353245325
+        #self.shelloutconfig = "config0-hub:::{}::resource_wrapper".format(self.app_name)
+
+        '''
+
+        self.classname = 'TerraformWrapper'
+
+        self.logger = Config0Logger(self.classname,
+                                       logcategory="cloudprovider")
+
+        self.logger.debug("Instantiating %s" % self.classname)
+
+        self.exclude_tfvars = None
+        self.postscript = None
+        self.postscript_path = None
+        self.runtime_env_vars = None
+        self.build_env_vars = None
+
+        self.bool_none = [ "None",
+                           "none",
+                           "null",
+                           "NONE",
+                           "None",
+                           None ]
+
+        self.bool_false = [ "false",
+                            "False",
+                            "FALSE",
+                            False ]
+
+        self.bool_true = [ "TRUE",
+                           "true",
+                           "True",
+                           True ]
+
+        Config0ResourceTFVars.__init__(self)
+
+        set_must_exists = [ "tmp_bucket",
+                            "log_bucket" ]
+
+        if os.environ.get("METHOD") == "create":
+            set_must_exists.extend( [ "ssm_name",
+                                      "stateful_id",
+                                      "remote_stateful_bucket" ] )
+
+        # ref 4353245325
+        ResourceCmdHelper.__init__(self,
+                                   app_name="terraform",
+                                   set_variables=["method",
+                                                  "shelloutconfig"],
+                                   set_must_exists=set_must_exists,
+                                   set_default_values={ "codebuild_basename":"config0-iac",
+                                                        "codebuildspec_version":"1",
+                                                        "failed_destroy":None,
+                                                        "ssm_name":None,
+                                                        "build_timeout":3600,
+                                                        "build_image":"aws/codebuild/standard:4.0",
+                                                        "compute_type":"BUILD_GENERAL1_SMALL",
+                                                        "image_type":"LINUX_CONTAINER",
+                                                        "buildspec_file":"buildspec.yml"})
+
+        self.terraform_tfvars = os.path.join(self.exec_dir,
+                                             "terraform.tfvars")
+
+    def add_destroy_params(self,resource):
+
+        '''
+        we typically load the destroy parameters along with created resource like a 
+        VPC or database 
+
+        the resource is therefore self contained, whereby it specifies to the 
+        system how it can be destroyed.
+
+        for terraform, we include things like the docker image used to 
+        destroy the resource and any environmental variables 
+        '''
+
+        # Create destroy resource arguments and reference
+        resource["destroy"] = {"shelloutconfig":self.shelloutconfig}
+
+        # environmental variables to include during destruction
+        env_vars = {"METHOD":"destroy"}
+
+        if self.destroy_env_vars: 
+            env_vars = dict(env_vars,**self.destroy_env_vars)
+
+        if self.stateful_id: 
+            env_vars["STATEFUL_ID"] = self.stateful_id
+
+        env_vars["DOCKER_EXEC_ENV"] = self.docker_image
+        env_vars["DOCKER_RUNTIME"] = self.docker_image
+
+        resource["destroy"]["env_vars"] = json.dumps(env_vars)
+
+        if env_vars.get("STATEFUL_ID"): 
+            resource["destroy"]["stateful_id"] = env_vars["STATEFUL_ID"]
+
+        if self.destroy_execgroup: 
+            resource["destroy"]["execgroup"] = self.destroy_execgroup
+
+        return resource
+
+    def _get_runtime_env_vars(self,method="create"):
+
+        if not self.build_env_vars:
+            self.build_env_vars = {}
+
+        try:
+            exclude_vars = list(self.tf_settings["tf_vars"].keys())
+        except:
+            exclude_vars = self.exclude_tfvars
+
+        self.build_env_vars["METHOD"] = method
+
+        self.insert_os_env_prefix_envs(self.build_env_vars,
+                                       exclude_vars)
+
+        if self.runtime_env_vars:
+            for _k,_v in self.runtime_env_vars.items():
+                self.build_env_vars[_k] = _v
+
+        self.build_env_vars["STATEFUL_ID"] = self.stateful_id # this should be set by ResourceCmdHelper
+        self.build_env_vars["APP_DIR"] = self.app_dir  # this should be set by ResourceCmdHelper 
+        self.build_env_vars["APP_NAME"] = self.app_name  # this should be set by ResourceCmdHelper 
+        self.build_env_vars["SHARE_DIR"] = self.share_dir # this should be set by ResourceCmdHelper
+        self.build_env_vars["RUN_SHARE_DIR"] = self.run_share_dir # this should be set by ResourceCmdHelper
+        self.build_env_vars["LOG_BUCKET"] = self.log_bucket # this should be set by ResourceCmdHelper
+        self.build_env_vars["REMOTE_STATEFUL_BUCKET"] = self.remote_stateful_bucket # this should be set by ResourceCmdHelper
+        self.build_env_vars["TMP_BUCKET"] = self.tmp_bucket # this should be set by ResourceCmdHelper
+        self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout # this should be set by ResourceCmdHelper and used for duratiion of temp iam credentials
+        self.build_env_vars["TMPDIR"] = "/tmp"
+        self.build_env_vars["DOCKER_IMAGE"] = self.docker_image
+        self.build_env_vars["METHOD"] = method
+
+        # ssm name setting
+        if self.build_env_vars.get("SSM_NAME"):     # usually set in create
+            self.ssm_name = self.build_env_vars["SSM_NAME"]
+        elif os.environ.get("SSM_NAME"):
+            self.ssm_name = os.environ["SSM_NAME"]
+
+        if self.ssm_name:
+            self.build_env_vars["SSM_NAME"] = self.ssm_name 
+
+        return 
+
+    def _create_docker_env_file(self):
+
+        # note: self.docker_env_file is set by 
+        # "_get_docker_env_filepath" in ResourceCmdHelper
+        if not self.build_env_vars.items():
+            return 
+
+        file_obj = open(self.docker_env_file,"w")
+
+        for _k,_v in self.build_env_vars.items():
+            file_obj.write("\n")
+            file_obj.write("{}={}".format(_k,_v))
+
+        file_obj.close()
+
+    def _create_codebuild_env_file(self):
+
+        if not self.build_env_vars:
+            return 
+
+        env_file = os.path.join(self.run_share_dir,
+                                self.app_dir,
+                                "build_env_vars.env")
+
+        file_obj = open(env_file,"w")
+
+        for _k,_v in self.build_env_vars.items():
+            file_obj.write("\n")
+            file_obj.write("{}={}".format(_k,_v))
+
+        file_obj.close()
+
+    def _aggregate_output(self,results,output=None):
+
+        if not output:
+            output = ""
+
+        if not results:
+            return output
+
+        try:
+            _output = results.get("output")
+        except:
+            _output = None
+
+        if not _output:
+            return output
+
+        return output + results.get("output")
+
+    def _get_docker_run_cmd(self,**kwargs):
+
+        share_dir = kwargs.get("share_dir",self.share_dir)
+        run_share_dir = kwargs.get("run_share_dir",self.run_share_dir)
+        docker_env_file = kwargs.get("docker_env_file",self.docker_env_file)
+
+        if not os.path.exists(docker_env_file):
+
+            self.logger.error("Cannot find environmental file {}".format(docker_env_file))
+
+            if method:
+                cmd = 'docker run -e METHOD="{}" --rm -v {}:{} {}'.format(method,
+                                                                          run_share_dir,
+                                                                          share_dir,
+                                                                          self.docker_image)
+            else:
+                cmd = 'docker run --rm -v {}:{} {}'.format(run_share_dir,
+                                                           share_dir,
+                                                           self.docker_image)
+        else:
+            if method:
+                cmd = 'docker run -e METHOD="{}" --env-file {} --rm -v {}:{} {}'.format(method,
+                                                                                        docker_env_file,
+                                                                                        run_share_dir,
+                                                                                        share_dir,
+                                                                                        self.docker_image)
+            else:
+                cmd = 'docker run --env-file {} --rm -v {}:{} {}'.format(docker_env_file,
+                                                                         run_share_dir,
+                                                                         share_dir,
+                                                                         self.docker_image)
+
+        return cmd
+
+    def _exec_docker_local(self,method=None,retries=None):
+
+        os.chdir(self.run_share_dir)
+
+        cmd = self._get_docker_run_cmd()
+
+        self.logger.debug(cmd)
+
+        if method == "destroy" and retries: 
+            retries = 6
+
+        if not retries: 
+            retries = 1
+
+        output = None
+
+        for retry in range(retries):
+
+            results = self.execute(cmd,
+                                   output_to_json=False,
+                                   exit_error=False)
+
+            output = self._aggregate_output(results,
+                                            output=output)
+
+            if not results or results.get("status") is False:
+                continue
+
+            break
+
+        results["output"] = output
+
+        return results
+
+    def _tf_map_list_fix_value(self,_value):
+
+        # check object type
+        # convert to string
+        if isinstance(_value,dict):
+            _value = json.dumps(_value)
+
+        if isinstance(_value,list):
+            _value = json.dumps(_value)
+
+        # check if string object is a list or dict
+        _map_list_prefixes = ["[","{"]
+        _map_list_suffixes = ["]","}"]
+
+        _status = None
+
+        try:
+            _first_char = _value[0]
+        except:
+            _first_char = None
+
+        if not _first_char:
+            msg = "cannot determine first character for _value {} type {}".format(_value,
+                                                                                  type(_value))
+
+            raise Exception(msg)
+
+        if _value[0] not in _map_list_prefixes: 
+            return _value,_status
+
+        # map or list?
+        _status = True
+        _value = _value.replace("'",'"')
+
+        if _value[0] not in _map_list_prefixes and _value[0] in ["'",'"']:
+
+            msg = "the first character should be {}".format(_map_list_prefixes)
+            raise Exception(msg)
+            #_value = _value[1:]
+
+        if _value[-1] not in _map_list_suffixes and _value[-1] in ["'",'"']:
+
+            msg = "the last character should be {}".format(_map_list_suffixes)
+            raise Exception(msg)
+
+        return _value,_status
+
+    def _tf_number_value(self,value):
+
+        try:
+            value0 = value[0]
+        except:
+            value0 = None
+
+        if value0 and value0 in [ "0", 0 ]:
+            return 0,False
+
+        if "." in str(value):
+
+            try:
+                new_value = float(value)
+                return new_value,"float"
+            except:
+                pass
+
+        else:
+
+            try:
+                new_value = int(value)
+                return new_value,"int"
+            except:
+                pass
+    
+        return value,None
+
+    def _convert_iter_to_str(self,obj):
+
+        if isinstance(obj,list) or isinstance(obj,dict):
+            try:
+                new_obj = json.dumps(literal_eval(json.dumps(obj)))
+            except:
+                new_obj = json.dumps(obj).replace("'",'"')
+
+            return new_obj
+
+        try:
+            new_obj = json.dumps(literal_eval(obj))
+        except:
+            new_obj = obj
+
+        return new_obj
+
+    def _get_bool_tf_var(self,value):
+
+        if value in self.bool_none:
+            return 'null'
+
+        if value in self.bool_false:
+            return 'false'
+
+        if value in self.bool_true:
+            return 'true'
+
+        return value
+
+    # revisit 4352525
+    # create terraform.tfvars file from TF_VAR_* variables
+    def _create_terraform_tfvars(self):
+
+        if self.tf_settings and self.tf_settings.get("tf_vars"):
+            _tfvars = self.tf_settings["tf_vars"]
+        else:
+            _tfvars = self.get_os_env_prefix_envs()
+
+        if not _tfvars: 
+            return
+
+        with open(self.terraform_tfvars,"w") as f:
+
+            for _key,_input in _tfvars.items():
+                _type = _input["type"]
+
+                if _type == "dict":
+                    _value = self._convert_iter_to_str(_input["value"])
+                    _quoted = None
+                elif _type == "list":
+                    _value = self._convert_iter_to_str(_input["value"])
+                    _quoted = None
+                elif _type == "bool":
+                    _quoted = None
+                    _value = self._get_bool_tf_var(_input["value"])
+                elif _type == "float":
+                    _value = _input["value"]
+                    _quoted = None
+                elif _type == "int":
+                    _value = _input["value"]
+                    _quoted = None
+                else:
+                    _value = _input["value"]
+                    _quoted = True
+
+                self.logger.debug("_create_terraform_tfvars (new_format): {} -> <{}> {}".format(_key,
+                                                                                                _type,
+                                                                                                _value))
+
+                if _quoted:
+                    _entry = '{} \t= "{}"'.format(_key,_value)
+                else:
+                    _entry = '{} \t= {}'.format(_key,_value)
+
+                f.write(_entry)
+                f.write("\n")
+
+        self.logger.debug("*"*32)
+        self.logger.debug("")
+        self.logger.debug("Wrote terraform.tfvars: {}".format(self.terraform_tfvars))
+        self.logger.debug("")
+        self.logger.debug("*"*32)
+
+        return _tfvars.keys()
+
+    def _exec_codebuild(self,method="create"):
+
+        self._create_codebuild_env_file()
+
+        cinputargs = { "method":method,
+                       "build_timeout":self.build_timeout,
+                       "remote_stateful_bucket":self.remote_stateful_bucket,
+                       "codebuild_basename":self.codebuild_basename }
+
+        if self.build_env_vars:
+            cinputargs["build_env_vars"] = self.build_env_vars 
+
+        if self.ssm_name:
+            cinputargs["ssm_name"] = self.ssm_name 
+
+        if self.codebuildspec_version == "2":
+            codebuild = CodebuildV2(**cinputargs)
+        else:
+            codebuild = CodebuildV1(**cinputargs)
+
+        return codebuild.run()
+
+    def _exec_docker_create(self):
+
+        self._get_runtime_env_vars(method="create")
+
+        if os.environ.get("USE_CODEBUILD",True):
+            results = self._exec_codebuild(method="create")
+        else:
+            self._create_docker_env_file()
+            results = self._exec_docker_local(method="create")
+            cmd = "rm -rf {}/.terraform".format(self.exec_dir)  # clean up .terraform
+            os.system(cmd)
+
+        if results.get("output"):
+            self.append_log(results["output"])
+            del results["output"]
+
+        if results.get("status") is False: 
+            self.logger.error("Terraform failed here {}!".format(self.run_share_dir))
+
+        return results
+
+    def _set_tfstate_parse(self):
+
+        if not self.tf_settings:
+            return
+
+        # new version of resource setttings
+        resource_params = self.tf_settings.get("resource_params")
+
+        if resource_params and resource_params.get("include_raw"):
+            self.tf_exec_include_raw = True
+
+        if resource_params and resource_params.get("add_keys"):
+            self.tf_exec_add_keys = resource_params["add_keys"]
+        elif resource_params and resource_params.get("include_keys"):
+            self.tf_exec_add_keys = resource_params["include_keys"]
+
+        if resource_params and resource_params.get("remove_keys"):
+            self.tf_exec_remove_keys.extend(resource_params["remove_keys"])
+        elif resource_params and resource_params.get("exclude_keys"):
+            self.tf_exec_remove_keys.extend(resource_params["exclude_keys"])
+
+        if resource_params and resource_params.get("map_keys"):
+            self.tf_exec_map_keys = resource_params["map_keys"]
+
+    def add_destroy_params(self,resource):
+
+        '''
+        we typically load the destroy parameters along with created resource like a 
+        VPC or database 
+
+        the resource is therefore self contained, whereby it specifies to the 
+        system how it can be destroyed.
+
+        for terraform, we include things like the docker image used to 
+        destroy the resource and any environmental variables 
+        '''
+
+        # Create destroy resource arguments and reference
+        resource["destroy"] = {"shelloutconfig":self.shelloutconfig}
+
+        # environmental variables to include during destruction
+        env_vars = {"METHOD":"destroy"}
+
+        if self.destroy_env_vars: 
+            env_vars = dict(env_vars,**self.destroy_env_vars)
+
+        if self.stateful_id: 
+            env_vars["STATEFUL_ID"] = self.stateful_id
+
+        env_vars["DOCKER_EXEC_ENV"] = self.docker_image
+        env_vars["DOCKER_RUNTIME"] = self.docker_image
+
+        resource["destroy"]["env_vars"] = json.dumps(env_vars)
+
+        if env_vars.get("STATEFUL_ID"): 
+            resource["destroy"]["stateful_id"] = env_vars["STATEFUL_ID"]
+
+        if self.destroy_execgroup: 
+            resource["destroy"]["execgroup"] = self.destroy_execgroup
+
+        return resource
+
+    def create(self):
+
+        if not self.stateful_id:
+            self.logger.error("STATEFUL_ID needs to be set")
+
+        # revisit 4352525
+        if not self.templify(app_template_vars="TF_EXEC_TEMPLATE_VARS",
+                             **self.inputargs):
+
+            self.exclude_tfvars = self._create_terraform_tfvars()
+
+        if not os.path.exists(self.exec_dir):
+            self.logger.warn("terraform directory must exists at {} - something went wrong".format(self.exec_dir))
+            os.chdir(self.cwd)
+            exit(9)
+
+        results = self._exec_docker_create()
+
+        if results.get("status") in [ False, "False" ]:
+            try:
+                exit(results.get("exitcode"))
+            except:
+                exit(9)
+
+        # parse tfstate file
+        os.chdir(self.exec_dir)
+
+        self._set_tfstate_parse()
+
+        if self.postscript_path:
+
+            self.logger.debug("u4324: getting resource from custom postscript path")
+
+            resource = self.get_resources_details()
+
+            try:
+                resource = self.to_json(resource)
+            except:
+                self.logger.warn("u4324: could not convert resource to json")
+
+        else:
+            self.logger.debug("u4324: getting resource from standard tfstate_to_output")
+
+            resource = self._tfstate_to_output()
+
+            if self.add_resource_inputargs:
+                resource["resource_inputargs"] = self.add_resource_inputargs
+
+            resource = self.configure_resources_details(resource)
+
+        if not resource: 
+            self.logger.warn("u4324: resource info is not found in the output")
+            return
+
+        os.chdir(self.cwd)
+
+        # enter into resource db through
+        # file location or through standard out
+        if self.resource_json: 
+            self.logger.debug("u4324: inserting retrieved data into {}".format(self.resource_json))
+
+            to_jsonfile(resource,
+                        self.resource_json)
+        else:
+            raise Exception("resource_json needs to be set")
+
+        exit(0)
+
+    def destroy(self):
+
+        self._get_runtime_env_vars(method="destroy")
+
+        if os.environ.get("USE_CODEBUILD",True):
+            results = self._exec_codebuild(method="destroy")
+        else:
+            results = self._exec_docker_local(method="destroy")
+
+        if self.failed_destroy and results.get("status") in [ False, "False" ]:
+            try:
+                exit(results.get("exitcode"))
+            except:
+                exit(9)
+
+        try:
+            os.chdir(self.cwd)
+        except:
+            os.chdir("/tmp")
+
+        self.print_output(output=results.get("output"))
+
+        return results
+
+class CodebuildParams:
+
+    def __init__(self,**kwargs):
+
+        self.classname = "CodebuildParams"
+
+        self.method = kwargs.get("method","create")
+        self.build_timeout = int(kwargs.get("build_timeout",1800))
+        self.build_env_vars = kwargs.get("build_env_vars")
+        self.ssm_name = kwargs.get("ssm_name")
+        self.remote_stateful_bucket = kwargs.get("remote_stateful_bucket")
+        self.codebuild_basename = kwargs.get("codebuild_basename")
+        self.codebuild_role = kwargs.get("codebuild_role","config0-assume-poweruser")
+        self.skip_env_vars = [ "AWS_SECRET_ACCESS_KEY" ]
+
+        if not self.build_env_vars:
+            self.build_env_vars = {}
+
+        self._override_env_var_method()
+
+        self.tf_bucket_key = None
+        self.tf_bucket_path = None
+
+        self._set_tf_version()
+        self._set_tmp_tf_bucket_loc()
+    
+    def _set_tmp_tf_bucket_loc(self):
+
+        try:
+            self.tmp_bucket = self.build_env_vars["TMP_BUCKET"]
+        except:
+            self.tmp_bucket = None
+
+        if self.tmp_bucket:
+            self.tf_bucket_key = f"downloads/terraform/{self.tf_version}"
+            self.tf_bucket_path = f"s3://{self.tmp_bucket}/{self.tf_bucket_key}"
+
+    def _set_tf_version(self):
+
+        try:
+            self.tf_version = self.build_env_vars["DOCKER_IMAGE"].split(":")[-1]
+        except:
+            self.tf_version = "1.5.4"
+
+    def _override_env_var_method(self):
+        
+        if not self.build_env_vars.get("METHOD"):
+            return
+
+        if self.method == "destroy":
+            self.build_env_vars["METHOD"] = "destroy"
+        elif self.method == "create":
+            self.build_env_vars["METHOD"] = "create"
+
+    def _get_tf_direct(self):
+
+        contents = '''
+  install:
+    commands:
+      - which zip || apt-get update
+      - which zip || apt-get install -y unzip zip
+      - cd $TMPDIR
+      - aws s3 cp {loc} terraform.zip --quiet || export DNE="True"
+      - if [ ! -z "$DNE" ]; then echo "downloading tf {ver} from hashicorp"; fi
+      - if [ ! -z "$DNE" ]; then curl -L -s https://releases.hashicorp.com/terraform/{ver}/terraform_{ver}_linux_amd64.zip -o terraform.zip; fi
+      - if [ ! -z "$DNE" ]; then aws s3 cp terraform.zip {loc} --quiet ; fi
+      - unzip terraform.zip
+      - mv terraform /usr/local/bin/terraform
+'''.format(loc=self.tf_bucket_path,
+           ver=self.tf_version)
+
+        return contents
+
+    def _get_tf_from_docker_image(self):
+
+        contents = '''
+  install:
+    commands:
+      - docker run --name temp-copy-image -d --entrypoint /bin/sleep {} 900
+      - docker cp temp-copy-image:/bin/terraform /usr/local/bin/terraform
+      - docker rm -fv temp-copy-image
+      - terraform --version
+'''.format(self.build_env_vars["DOCKER_IMAGE"])
+
+        return contents
+
+    def _set_inputargs(self):
+
+        self.buildparams = {"buildspec":self.get_buildspec(),
+                            "remote_stateful_bucket":self.remote_stateful_bucket,
+                            "codebuild_basename":self.codebuild_basename,
+                            "build_timeout":self.build_timeout,
+                            "method":self.method}
+
+        if self.build_env_vars:
+            self.buildparams["build_env_vars"] = self.build_env_vars
+
+        return self.buildparams
+
+    def get_init_contents(self):
+
+        contents = '''
+version: 0.2
+
+env:
+  variables:
+    TMPDIR: /tmp
+'''
+        if self.ssm_name:
+            ssm_params_content = '''
+  parameter-store:
+    SSM_VALUE: $SSM_NAME
+'''
+            contents = contents + ssm_params_content
+
+        final_contents = '''
+phases:
+'''
+        contents = contents + final_contents
+
+        return contents
+
+    def get_install_tf(self):
+
+        #return self._get_tf_from_docker_image()
+        return self._get_tf_direct()
+
+    def run(self):
+
+        self._set_inputargs()
+        self.codebuild_helper = CodebuildResourceHelper(**self.buildparams)
+        self.codebuild_helper.run()
+
+        return self.codebuild_helper.results
+
+class CodebuildV2(CodebuildParams):
+
+    '''
+    does not work b/c codebuild need to pass on role 
+    privileges to terraform running in docker container
+    '''
+
+    def __init__(self,**kwargs):
+
+        self.classname = "CodebuildV2"
+        CodebuildParams.__init__(self,**kwargs)
+
+    def _get_codebuildspec_prebuild(self):
+
+        # max duration is 3600 for chain assume roles
+        aws_cred_duration = self.build_timeout+60
+
+        if aws_cred_duration > 3600:
+            aws_cred_duration = 3600
+
+        contents = '''
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - mkdir -p $SHARE_DIR
+      - mkdir -p $RUN_SHARE_DIR/$APP_DIR
+      - export ROLE_ARN=$(aws iam get-role --role-name {} --query 'Role.Arn' --output text)
+      - export ASSUME_ROLE_OUTPUT=$(aws sts assume-role --role-arn $ROLE_ARN --role-session-name "session-$STATEFUL_ID" --duration-seconds {})
+      - export AWS_ACCESS_KEY_ID=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.AccessKeyId')
+      - export AWS_SECRET_ACCESS_KEY=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SecretAccessKey')
+      - export AWS_SESSION_TOKEN=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SessionToken')
+      - aws s3 cp s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID $TMPDIR/$STATEFUL_ID.tar.gz --quiet
+      - tar xfz $TMPDIR/$STATEFUL_ID.tar.gz -C $RUN_SHARE_DIR/$APP_DIR/
+      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
+'''.format(self.codebuild_role,
+           str(aws_cred_duration))
+
+        return contents
+
+    def _get_codebuildspec_build(self):
+
+        '''
+        #cmd = 'docker run -e METHOD=create --env-file .env --rm -v $RUN_SHARE_DIR:$SHARE_DIR $DOCKER_IMAGE'
+        #cmd = 'docker run '
+        '''
+
+        cmd = 'docker run -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN '
+
+        if self.build_env_vars:
+            for _k,_v in self.build_env_vars.items():
+                if _k in self.skip_env_vars:
+                    continue
+
+                cmd = cmd + "-e {}={} ".format(_k,_v)
+
+        cmd = cmd + ' --rm -v $RUN_SHARE_DIR:$SHARE_DIR $DOCKER_IMAGE'
+
+        contents = '''
+  build:
+    on-failure: ABORT
+    commands:
+      - cd /var/tmp
+      - {}
+'''.format(cmd)
+
+        return contents
+
+    def _get_codebuildspec_postbuild(self):
+
+        contents = '''
+  post_build:
+    commands:
+      - cd $RUN_SHARE_DIR
+      - tar cfz $TMPDIR/$STATEFUL_ID.tar.gz .
+      - aws s3 cp $TMPDIR/$STATEFUL_ID.tar.gz s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID --quiet
+      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
+      - echo "# terraform files uploaded s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID"
+'''
+        return contents
+
+    def get_buildspec(self):
+
+        init_contents = self.get_init_contents()
+        prebuild = self._get_codebuildspec_prebuild()
+        build = self._get_codebuildspec_build()
+        postbuild = self._get_codebuildspec_postbuild()
+
+        contents = init_contents + prebuild + build + postbuild
+
+        return contents
+
+class CodebuildV1(CodebuildParams):
+
+    def __init__(self,**kwargs):
+
+        self.classname = "CodebuildV1"
+        CodebuildParams.__init__(self,**kwargs)
+
+    def _get_codebuildspec_prebuild(self):
+
+        contents = '''
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - aws s3 cp s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID $TMPDIR/$STATEFUL_ID.tar.gz --quiet
+      - mkdir -p $TMPDIR/terraform
+      - tar xfz $TMPDIR/$STATEFUL_ID.tar.gz -C $TMPDIR/terraform
+      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
+'''
+        if self.ssm_name:
+            ssm_params_content = '''
+      - echo $SSM_VALUE | base64 -d > exports.env && chmod 755 exports.env
+      - . ./exports.env 
+'''
+            contents = contents + ssm_params_content
+
+        return contents
+
+    def _get_codebuildspec_build(self):
+
+        if self.method == "create":
+
+            contents = '''
+  build:
+    on-failure: ABORT
+    commands:
+      - cd $TMPDIR/terraform
+      - /usr/local/bin/terraform init
+      - /usr/local/bin/terraform plan -out=tfplan
+      - /usr/local/bin/terraform apply tfplan || export FAILED=true
+      - if [ ! -z "$FAILED" ]; then /usr/local/bin/terraform destroy -auto-approve; fi
+      - if [ ! -z "$FAILED" ]; then echo "terraform apply failed - destroying and exiting with failed" && exit 9; fi
+'''
+        elif self.method == "destroy":
+
+            contents = '''
+  build:
+    on-failure: ABORT
+    commands:
+      - cd $TMPDIR/terraform
+      - /usr/local/bin/terraform init
+      - /usr/local/bin/terraform destroy -auto-approve
+'''
+        else:
+            raise Exception("method needs to be create/destroy")
+
+        return contents
+
+    def _get_codebuildspec_postbuild(self):
+
+        contents = '''
+  post_build:
+    commands:
+      - cd $TMPDIR/terraform
+      - tar cfz $TMPDIR/$STATEFUL_ID.tar.gz .
+      - aws s3 cp $TMPDIR/$STATEFUL_ID.tar.gz s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID --quiet
+      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
+      - echo "# terraform files uploaded s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID"
+
+'''
+        return contents
+
+    def get_buildspec(self):
+
+        init_contents = self.get_init_contents()
+        install_tf = self.get_install_tf()
+        prebuild = self._get_codebuildspec_prebuild()
+        build = self._get_codebuildspec_build()
+        postbuild = self._get_codebuildspec_postbuild()
+
+        if self.method == "create":
+            contents = init_contents + install_tf + prebuild + build + postbuild
+        else:
+            contents = init_contents + install_tf + prebuild + build  # if destroy, we skip postbuild
+
+        return contents
+
+def usage():
+
+    print("""
+script + environmental variables
+
+or
+
+script + json_input (as argument)
+
+environmental variables:
+
+    basic:
+
+        METHOD - create/destroy
+
+        # most common that unpacks all the variables
+        CONFIG0_RESOURCE_SETTINGS - a b64 string of variables for Config0 resource entry
+        TF_EXEC_TEMPLATE_VARS - environmental variables use for templating terraform files (not common)
+
+    (these are set by the inherited class - ResourceCmdHelper)
+    resourcecmdhelper:
+        STATEFUL_ID - the stateful_id to reference the state of the execution
+        DOCKER_RUNTIME/DOCKER_EXEC_ENV (default elasticdev/terraform-run-env) - the docker container/image to run execution
+        DOCKER_ENV_FILE (default .env) - name of the docker env file to create
+        SHARE_DIR (default is /var/tmp/share) - the shared directory that is shared with the worker during docker container execution
+
+       """)
+    exit(4)
+
+if __name__ == '__main__':
+
+    try:
+        json_input = sys.argv[1]
+    except:
+        json_input = None
+
+    main = Main()
+
+    if json_input:
+        main.set_inputargs(json_input=json_input)
+    else:
+        set_env_vars = [ "CONFIG0_RESOURCE_SETTINGS_HASH" ]
+        main.set_inputargs(set_env_vars=set_env_vars)
+   
+    method = main.inputargs.get("method")
+
+    if not method:
+        print("method/ENV VARIABLE METHOD is needed")
+        exit(4)
+
+    if method == "create":
+        main.create()
+
+    elif method == "destroy":
+        main.destroy()
+
+    else:
+        usage()
+        print('method "{}" not supported!'.format(method))
+        exit(4)
