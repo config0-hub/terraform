@@ -478,7 +478,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         '''
 
         # ref 4353245325
-        #self.shelloutconfig = "config0-hub:::{}::resource_wrapper".format(self.app_name)
+        #self.shelloutconfig = "config0-publish:::{}::resource_wrapper".format(self.app_name)
 
         '''
 
