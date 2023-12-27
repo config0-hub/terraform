@@ -1,20 +1,4 @@
 #!/usr/bin/env python
-#
-#This file is part of "jiffy".
-#
-#Project: jiffy: A product for building and managing infrastructure: 
-#cloud provider services, and servers and their configurations.
-#
-#Description: A product for building and managing infrastructure. 
-#This includes third party API calls for services such as virtual
-#cloud servers, load balancers, databases, and other. The product 
-#manages connectivity and appropriate communication among these 
-#aws.
-#
-#Copyright (C) Gary Leong - All Rights Reserved
-#Unauthorized copying of this file, via any medium is strictly prohibited
-#Proprietary and confidential
-#Written by Gary Leong  <gwleong@gmail.com, June 17,2023
 
 import os
 import json
@@ -195,6 +179,7 @@ class Config0ResourceTFVars(object):
         if not data:
             msg = 'tfstate_to_output: there is no data from {}'.format(os.path.join(os.getcwd(),
                                                                        self.tf_exec_state_file))
+            # fixfix777
             self.logger.debug(msg)
 
             return 
@@ -203,6 +188,7 @@ class Config0ResourceTFVars(object):
 
     def _insert_resource_values(self,values):
 
+        # fixfix777
         self.logger.debug("tfstate_to_output: resource_values {}".format(self.resource_values))
         
         if not self.resource_values:
@@ -210,6 +196,7 @@ class Config0ResourceTFVars(object):
 
         for _k,_v in self.resource_values.items():
 
+            # fixfix777
             self.logger.debug('tfstate_to_output: resource values key "{}" -> value "{}"'.format(_k,
                                                                                                  _v))
             values[_k] = _v
@@ -219,12 +206,14 @@ class Config0ResourceTFVars(object):
 
         for key in self.std_labels_keys:
 
+            # fixfix777
             if not values.get(key):
                 self.logger.debug('source standard label key "{}" not found'.format(key))
                 continue
 
             label_key = "label-{}".format(key)
 
+            # fixfix777
             if values.get(label_key):
                 self.logger.debug('label key "{}" already found'.format(label_key))
                 continue
@@ -237,6 +226,7 @@ class Config0ResourceTFVars(object):
             return
 
         for _k,_v in self.resource_labels.items():
+            # fixfix777
             self.logger.debug('tfstate_to_output: resource labels key "{}" -> value "{}"'.format("label-{}".format(_k),
                                                                                                  _v))
             values["label-{}".format(_k)] = _v
@@ -274,6 +264,7 @@ class Config0ResourceTFVars(object):
         else:
             data = self._get_tfstate_file()
 
+        # fixfix777
         self.logger.debug("tfstate_to_output: include raw = True")
 
         values["raw"] = {"terraform":b64_encode(data)}
@@ -285,6 +276,7 @@ class Config0ResourceTFVars(object):
             if resource["type"] != self.terraform_type:
                 continue
 
+            # fixfix777
             self.logger.debug("-" * 32)
             self.logger.debug("tfstate_to_output: instance attribute keys")
             self.logger.debug(list(resource["instances"][0]["attributes"].keys()))
@@ -300,6 +292,7 @@ class Config0ResourceTFVars(object):
                     if _key in values: 
                         continue
 
+                    # fixfix777
                     if _key in self.tf_exec_skip_keys: 
                         self.logger.debug('tfstate_to_output/tf_exec_skip_keys: tf instance attribute key "{}" skipped'.format(_key))
                         continue
@@ -314,10 +307,12 @@ class Config0ResourceTFVars(object):
                     else:
                         _added_bc = None
 
+                    # fixfix777
                     if not _added_bc:
                         self.logger.debug("tfstate_to_output/tf_exec_add_keys: key {} skipped".format(_key))
                         continue
 
+                    # fixfix777
                     self.logger.debug('{}: tf key "{}" -> value "{}" added to resource values'.format(_added_bc,
                                                                                                       _key,
                                                                                                       _value))
@@ -348,6 +343,7 @@ class Config0ResourceTFVars(object):
 
     def _insert_tf_map_keys(self,values):
 
+        # fixfix777
         self.logger.debug("#"*32)
         self.logger.debug("tfstate_to_output: tf_exec_map_keys")
         self.logger.json(self.tf_exec_map_keys)
@@ -358,6 +354,7 @@ class Config0ResourceTFVars(object):
 
         for _insertkey,_refkey in self.tf_exec_map_keys.items():
 
+            # fixfix777
             # _insertkey = "p1"
             # _refkey = "q1"
 
@@ -376,7 +373,8 @@ class Config0ResourceTFVars(object):
                     values[_insertkey] = {}
     
                 for _sub_insertkey,_sub_refkey in _refkey.items():
-    
+
+                    # fixfix777
                     if not values.get(_sub_refkey):
                         self.logger.debug('tfstate_to_output: mapped key sub_insertkey {} sub_refkey {} not found'.format(_sub_insertkey,
                                                                                                                           _sub_refkey))
@@ -386,6 +384,7 @@ class Config0ResourceTFVars(object):
                     if "," in values[_sub_refkey]:
                         _sub_insertkey2,_subrefkey2 = values[_sub_refkey].split(",")
 
+                        # fixfix777
                         if _sub_insertkey2 not in self.do_not_display:
                             self.logger.debug('tfstate_to_output: mapped key ["{}"]["{}"]["{}"] -> value "{}"'.format(_insertkey,
                                                                                                                       _sub_insertkey,
@@ -396,6 +395,7 @@ class Config0ResourceTFVars(object):
 
                     else:
                         if _sub_insertkey not in self.do_not_display:
+                            # fixfix777
                             self.logger.debug('tfstate_to_output: mapped key ["{}"]["{}"] -> value "{}"'.format(_insertkey,
                                                                                                                 _sub_insertkey,
                                                                                                                 values[_sub_refkey.strip()]))
@@ -403,6 +403,7 @@ class Config0ResourceTFVars(object):
                         values[_insertkey][_sub_insertkey] = values[_sub_refkey]
     
             elif values.get(_refkey):
+                # fixfix777
                 if _refkey not in self.do_not_display:
                     self.logger.debug('tfstate_to_output: mapped key ["{}"] -> value "{}"'.format(_insertkey,_refkey))
 
@@ -416,10 +417,12 @@ class Config0ResourceTFVars(object):
         
         self.data = self._get_tfstate_file()
 
+        # fixfix777
         if not self.data:
             self.logger.debug("u4324: no data to retrieved from statefile")
             return False
-        
+
+        # fixfix777
         self.logger.debug("u4324: retrieved data from statefile")
 
         values = { "terraform_type":self.terraform_type,
@@ -478,7 +481,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         '''
 
         # ref 4353245325
-        #self.shelloutconfig = "config0-publish:::{}::resource_wrapper".format(self.app_name)
+        #self.shelloutconfig = "config0-hub:::{}::resource_wrapper".format(self.app_name)
 
         '''
 
@@ -487,6 +490,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         self.logger = Config0Logger(self.classname,
                                        logcategory="cloudprovider")
 
+        # fixfix777
         self.logger.debug("Instantiating %s" % self.classname)
 
         self.exclude_tfvars = None
@@ -561,7 +565,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         env_vars = {"METHOD":"destroy"}
 
         if self.destroy_env_vars: 
-            env_vars = dict(env_vars,**self.destroy_env_vars)
+            env_vars = dict(env_vars,
+                            **self.destroy_env_vars)
 
         if self.stateful_id: 
             env_vars["STATEFUL_ID"] = self.stateful_id
@@ -624,7 +629,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
     def _create_docker_env_file(self):
 
-        # note: self.docker_env_file is set by 
+        # note: self.docker_env_file is set by
         # "_get_docker_env_filepath" in ResourceCmdHelper
         if not self.build_env_vars.items():
             return 
@@ -674,9 +679,14 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
     def _get_docker_run_cmd(self,**kwargs):
 
-        share_dir = kwargs.get("share_dir",self.share_dir)
-        run_share_dir = kwargs.get("run_share_dir",self.run_share_dir)
-        docker_env_file = kwargs.get("docker_env_file",self.docker_env_file)
+        share_dir = kwargs.get("share_dir",
+                               self.share_dir)
+
+        run_share_dir = kwargs.get("run_share_dir",
+                                   self.run_share_dir)
+
+        docker_env_file = kwargs.get("docker_env_file",
+                                     self.docker_env_file)
 
         if not os.path.exists(docker_env_file):
 
@@ -712,6 +722,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         cmd = self._get_docker_run_cmd()
 
+        # fixfix777
         self.logger.debug(cmd)
 
         if method == "destroy" and retries: 
@@ -778,6 +789,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
             msg = "the first character should be {}".format(_map_list_prefixes)
             raise Exception(msg)
+            # fixfix777
             #_value = _value[1:]
 
         if _value[-1] not in _map_list_suffixes and _value[-1] in ["'",'"']:
@@ -881,6 +893,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                     _value = _input["value"]
                     _quoted = True
 
+                # fixfix777
                 self.logger.debug("_create_terraform_tfvars (new_format): {} -> <{}> {}".format(_key,
                                                                                                 _type,
                                                                                                 _value))
@@ -893,6 +906,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                 f.write(_entry)
                 f.write("\n")
 
+        # fixfix777
         self.logger.debug("*"*32)
         self.logger.debug("")
         self.logger.debug("Wrote terraform.tfvars: {}".format(self.terraform_tfvars))
@@ -988,7 +1002,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         env_vars = {"METHOD":"destroy"}
 
         if self.destroy_env_vars: 
-            env_vars = dict(env_vars,**self.destroy_env_vars)
+            env_vars = dict(env_vars,
+                            **self.destroy_env_vars)
 
         if self.stateful_id: 
             env_vars["STATEFUL_ID"] = self.stateful_id
@@ -1037,6 +1052,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         if self.postscript_path:
 
+            # fixfix777
             self.logger.debug("u4324: getting resource from custom postscript path")
 
             resource = self.get_resources_details()
@@ -1047,6 +1063,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                 self.logger.warn("u4324: could not convert resource to json")
 
         else:
+            # fixfix777
             self.logger.debug("u4324: getting resource from standard tfstate_to_output")
 
             resource = self._tfstate_to_output()
@@ -1064,7 +1081,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         # enter into resource db through
         # file location or through standard out
-        if self.resource_json: 
+        if self.resource_json:
+            # fixfix777
             self.logger.debug("u4324: inserting retrieved data into {}".format(self.resource_json))
 
             to_jsonfile(resource,
@@ -1104,13 +1122,20 @@ class CodebuildParams:
 
         self.classname = "CodebuildParams"
 
-        self.method = kwargs.get("method","create")
-        self.build_timeout = int(kwargs.get("build_timeout",1800))
+        self.method = kwargs.get("method",
+                                 "create")
+
+        self.build_timeout = int(kwargs.get("build_timeout",
+                                            1800))
+
         self.build_env_vars = kwargs.get("build_env_vars")
         self.ssm_name = kwargs.get("ssm_name")
         self.remote_stateful_bucket = kwargs.get("remote_stateful_bucket")
         self.codebuild_basename = kwargs.get("codebuild_basename")
-        self.codebuild_role = kwargs.get("codebuild_role","config0-assume-poweruser")
+
+        self.codebuild_role = kwargs.get("codebuild_role",
+                                         "config0-assume-poweruser")
+
         self.skip_env_vars = [ "AWS_SECRET_ACCESS_KEY" ]
 
         if not self.build_env_vars:
@@ -1221,7 +1246,7 @@ phases:
         return contents
 
     def get_install_tf(self):
-
+        # fixfix777
         #return self._get_tf_from_docker_image()
         return self._get_tf_direct()
 
@@ -1243,7 +1268,8 @@ class CodebuildV2(CodebuildParams):
     def __init__(self,**kwargs):
 
         self.classname = "CodebuildV2"
-        CodebuildParams.__init__(self,**kwargs)
+        CodebuildParams.__init__(self,
+                                 **kwargs)
 
     def _get_codebuildspec_prebuild(self):
 
@@ -1329,7 +1355,8 @@ class CodebuildV1(CodebuildParams):
     def __init__(self,**kwargs):
 
         self.classname = "CodebuildV1"
-        CodebuildParams.__init__(self,**kwargs)
+        CodebuildParams.__init__(self,
+                                 **kwargs)
 
     def _get_codebuildspec_prebuild(self):
 
