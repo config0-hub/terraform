@@ -14,59 +14,103 @@ from config0_publisher.serialization import b64_decode
 from config0_publisher.serialization import b64_encode
 from config0_publisher.resource_manage import to_jsonfile
 
-
 class Config0ResourceTFVars(object):
+    """
+
+    This class serves as an interface for interacting with Terraform, providing variables, inputs, and outputs.
+    It is a specific implementation of TFVars on the Config0 platform.
+
+    Attributes:
+        resource_settings (dict):
+          A dictionary of resource settings that include most of the settings/variables for interacting with Terraform.
+          The resource settings are retrieved from the environment variable CONFIG0_RESOURCE_SETTINGS_HASH, which is base64encoded
+
+        resource_values (dict):
+          A dictionary of "resource" values to insert into the database.
+          It allows Terraform infrastructures values to be queried, retrieved, and used in other Config0 Terraform imported templates.
+
+        tf_settings (dict): A dictionary of Terraform settings retrieved from resource_settings.
+        tf_exec_skip_keys (list): A list of keys to skip when converting Terraform state files to resources values (insert into database)
+        tf_output_skip_keys (list): A list of output keys to skip when converting Terraform state files to resources values (insert into database).
+        tf_exec_include_raw (bool): A flag indicating whether to include the raw Terraform state file in resources values (insert into database).
+        tf_exec_add_keys (list): A list of keys to explicitly include when converting Terraform state files to resources values (insert into database).
+        tf_exec_remove_keys (list): A list of keys to exclude/remove when converting Terraform state files to resources values (insert into database).
+        do_not_display (list): A list of keys not to display when converting Terraform state files to resources values (insert into database).
+        tf_exec_map_keys (dict): A dictionary of keys to map when converting Terraform state files to resources values (insert into database).
+        tf_exec_state_file (str): The Terraform state file path.
+        runtime_settings (dict):
+           A dictionary of runtime settings retrieved from resource_settings.
+           This includes settings like the environment variables when executing terraform
+        resource_labels (dict):
+           A dictionary of resource labels (to be queried) to insert with the resource values.
+           This is similar to Kubernetes labels
+        resource_type (str): The resource type.
+        provider (str):
+           The provider.
+           Examples include: Config0, aws, do (digital ocean)
+    """
 
     def __init__(self):
 
-        self.classname = 'Config0ResourceTFVars'
+        self.classname = "Config0ResourceTFVars"
 
         self.tf_settings = {}  # => resource_settings -> tf_settings
 
-        self.tf_exec_skip_keys = [ "sensitive_attributes",
-                                   "ses_smtp_password_v4" ]
+        self.tf_exec_skip_keys = [
+            "sensitive_attributes",
+            "ses_smtp_password_v4",
+        ]
 
-        self.tf_output_skip_keys = [ "tags",
-                                     "label",
-                                     "tag",
-                                     "_id",
-                                     "resource_type",
-                                     "provider",
-                                     "labels"]
+        self.tf_output_skip_keys = [
+            "tags",
+            "label",
+            "tag",
+            "_id",
+            "resource_type",
+            "provider",
+            "labels",
+        ]
 
         self.tf_exec_include_raw = None
         self.tf_exec_add_keys = []
 
-        self.tf_exec_remove_keys = [ "private", 
-                                     "secret"]
+        self.tf_exec_remove_keys = [
+            "private",
+            "secret",
+        ]
 
-        self.do_not_display = [ "AWS_SECRET_ACCESS_KEY",
-                                "secret" ]
+        self.do_not_display = [
+            "AWS_SECRET_ACCESS_KEY",
+            "secret",
+        ]
 
         self.tf_exec_map_keys = {}
 
-        self.tf_exec_state_file = os.environ.get("TF_EXEC_STATE_FILE",
-                                                 "terraform.tfstate")
+        self.tf_exec_state_file = os.environ.get("TF_EXEC_STATE_FILE", "terraform.tfstate")
 
         self.add_resource_inputargs = {}
         self.resource_settings = {}
-        self.runtime_settings = {} # => resource_settings -> runtime_settings (docker)
+        self.runtime_settings = {}  # => resource_settings -> runtime_settings (docker)
         self.resource_values = None
         self.resource_labels = None
         self.resource_type = None
         self.provider = None
 
-        self.std_labels_keys = [ "region",
-                                 "provider",
-                                 "source_method",
-                                 "resource_type" ]
+        self.std_labels_keys = [
+            "region",
+            "provider",
+            "source_method",
+            "resource_type",
+        ]
 
         # set config0 resource settings
         self._init_config0_resource_settings()
 
     # only use for creation
     def _set_tf_settings(self):
-
+        """
+        This method sets the Terraform settings.
+        """
         try:
             self.tf_settings = self.resource_settings["terraform"]
         except:
@@ -83,12 +127,12 @@ class Config0ResourceTFVars(object):
             self.postscript_path = self.tf_settings["tf_exec_postscript_path"]
         elif self.tf_settings.get("tf_exec_postscript"):
             self.postscript = self.tf_settings["tf_exec_postscript"]
-            self.postscript_path = os.path.join(self.exec_dir,
-                                                self.postscript)
 
     # only use for creation
     def _set_runtime_settings(self):
-
+        """
+        This method sets the runtime settings.
+        """
         self.runtime_env_vars = {}
 
         include_env_vars_keys = None
@@ -98,7 +142,7 @@ class Config0ResourceTFVars(object):
             env_vars = self.runtime_settings.get("env_vars")
 
             if env_vars:
-                for _k,_v in env_vars.items():
+                for _k, _v in env_vars.items():
                     self.runtime_env_vars[_k.upper()] = _v
 
             include_env_vars_keys = self.runtime_settings.get("include_env_vars_keys")
@@ -120,7 +164,9 @@ class Config0ResourceTFVars(object):
             self.runtime_env_vars[_var] = os.environ[_var]
 
     def _init_config0_resource_settings(self):
-
+        """
+        This method initializes the Config0 resource settings.
+        """
         # unpackage config0 resource settings
         try:
             self.resource_settings = b64_decode(self.inputargs.get("config0_resource_settings_hash"))
@@ -170,31 +216,35 @@ class Config0ResourceTFVars(object):
         self._set_tf_settings()
 
     def _get_tfstate_file(self):
-
+        """
+        This method gets the Terraform state file.
+        """
         # read output file
         with open(self.tf_exec_state_file) as json_file:
             data = json.load(json_file)
-        
+
         if not data:
-            msg = 'tfstate_to_output: there is no data from {}'.format(os.path.join(os.getcwd(),
-                                                                       self.tf_exec_state_file))
+            msg = "tfstate_to_output: there is no data from {}".format(os.path.join(os.getcwd(), self.tf_exec_state_file))
             self.logger.debug(msg)
 
-            return 
+            return
 
         return data
 
-    def _insert_resource_values(self,values):
-
+    def _insert_resource_values(self, values):
+        """
+        This method inserts the resource values into the output values.
+        """
         self.logger.debug("tfstate_to_output: resource_values {}".format(self.resource_values))
-        
+
         if not self.resource_values:
-            return 
+            return
 
-        for _k,_v in self.resource_values.items():
+        for _k, _v in self.resource_values.items():
 
-            self.logger.debug('tfstate_to_output: resource values key "{}" -> value "{}"'.format(_k,
-                                                                                                 _v))
+            self.logger.debug(
+                "tfstate_to_output: resource values key \"{}\" -> value \"{}\"".format(_k, _v)
+            )
             values[_k] = _v
 
     # duplicate wertqttetqwetwqtqwt
@@ -906,14 +956,15 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         if self.ssm_name:
             cinputargs["ssm_name"] = self.ssm_name 
 
-        if self.codebuildspec_version == "2":
-            codebuild = CodebuildV2(**cinputargs)
+        # we can add other implementation of codebuild with the spec version
+        if self.codebuildspec_version == "1":
+            codebuild = CodebuildV1(**cinputargs)
         else:
             codebuild = CodebuildV1(**cinputargs)
 
         return codebuild.run()
 
-    def _exec_docker_create(self):
+    def _exec_tf_apply(self):
 
         self._get_runtime_env_vars(method="create")
 
@@ -930,7 +981,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             del results["output"]
 
         if results.get("status") is False: 
-            self.logger.error("Terraform failed here {}!".format(self.run_share_dir))
+            self.logger.error("Terraform apply failed here {}!".format(self.run_share_dir))
 
         return results
 
@@ -997,6 +1048,24 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return resource
 
+    def _eval_failure(self,results):
+
+        if results.get("status") in [ False, "False" ]:
+            if results.get("failed_message"):
+                failed_message = results.get("failed_message")
+            else:
+                failed_message = "exec tf apply failed"
+
+            self.logger.error(failed_message)
+            raise Exception(failed_message)
+
+            #try:
+            #    exit(results.get("exitcode"))
+            #except:
+            #    exit(9)
+
+        return
+
     def create(self):
 
         if not self.stateful_id:
@@ -1009,21 +1078,19 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.exclude_tfvars = self._create_terraform_tfvars()
 
         if not os.path.exists(self.exec_dir):
-            self.logger.warn("terraform directory must exists at {} - something went wrong".format(self.exec_dir))
-            os.chdir(self.cwd)
-            exit(9)
+            failed_message = "terraform directory must exists at {} - something went wrong".format(self.exec_dir)
+            raise Exception(failed_message)
 
-        results = self._exec_docker_create()
+        results = self._exec_tf_apply()
 
-        if results.get("status") in [ False, "False" ]:
-            try:
-                exit(results.get("exitcode"))
-            except:
-                exit(9)
+        # evaluate whether it failed
+        self._eval_failure(results)
+
+        # it succeeds at this point
 
         # parse tfstate file
-        os.chdir(self.exec_dir)
 
+        os.chdir(self.exec_dir)
         self._set_tfstate_parse()
 
         if self.postscript_path:
@@ -1063,22 +1130,26 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         else:
             raise Exception("resource_json needs to be set")
 
-        exit(0)
-
-    def destroy(self):
+    def _exec_tf_destroy(self):
 
         self._get_runtime_env_vars(method="destroy")
 
-        if os.environ.get("USE_CODEBUILD",True):
+        if os.environ.get("USE_CODEBUILD", True):
             results = self._exec_codebuild(method="destroy")
         else:
             results = self._exec_docker_local(method="destroy")
 
-        if self.failed_destroy and results.get("status") in [ False, "False" ]:
-            try:
-                exit(results.get("exitcode"))
-            except:
-                exit(9)
+        if results.get("status") is False:
+            self.logger.error("Terraform apply destroy here {}!".format(self.run_share_dir))
+
+        return results
+
+    def destroy(self):
+
+        results = self._exec_tf_destroy()
+
+        # evaluate whether it failed
+        self._eval_failure(results)
 
         try:
             os.chdir(self.cwd)
@@ -1086,8 +1157,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             os.chdir("/tmp")
 
         self.print_output(output=results.get("output"))
-
-        return results
 
 class CodebuildParams:
 
@@ -1231,115 +1300,7 @@ phases:
         self.codebuild_helper = CodebuildResourceHelper(**self.buildparams)
         self.codebuild_helper.run()
 
-        #if self.codebuild_helper.results.get("output"):
-        #    print(self.codebuild_helper.results["output"])
-        #    del self.codebuild_helper.results["output"]
-
-        if self.codebuild_helper.results.get("status") is False:
-            if self.results.get("failed_message"):
-                failed_message = self.results.get("failed_message")
-
-            if not failed_message:
-                failed_message = "codebuild failed"
-
-            self.logger.error(failed_message)
-            raise Exception(failed_message)
-
-        exit(0)
-
-        #return self.codebuild_helper.results
-
-class CodebuildV2(CodebuildParams):
-
-    '''
-    does not work b/c codebuild need to pass on role 
-    privileges to terraform running in docker container
-    '''
-
-    def __init__(self,**kwargs):
-
-        self.classname = "CodebuildV2"
-        CodebuildParams.__init__(self,
-                                 **kwargs)
-
-    def _get_codebuildspec_prebuild(self):
-
-        # max duration is 3600 for chain assume roles
-        aws_cred_duration = self.build_timeout+60
-
-        if aws_cred_duration > 3600:
-            aws_cred_duration = 3600
-
-        contents = '''
-  pre_build:
-    on-failure: ABORT
-    commands:
-      - mkdir -p $SHARE_DIR
-      - mkdir -p $RUN_SHARE_DIR/$APP_DIR
-      - export ROLE_ARN=$(aws iam get-role --role-name {} --query 'Role.Arn' --output text)
-      - export ASSUME_ROLE_OUTPUT=$(aws sts assume-role --role-arn $ROLE_ARN --role-session-name "session-$STATEFUL_ID" --duration-seconds {})
-      - export AWS_ACCESS_KEY_ID=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.AccessKeyId')
-      - export AWS_SECRET_ACCESS_KEY=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SecretAccessKey')
-      - export AWS_SESSION_TOKEN=$(echo "$ASSUME_ROLE_OUTPUT" | jq -r '.Credentials.SessionToken')
-      - aws s3 cp s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID $TMPDIR/$STATEFUL_ID.tar.gz --quiet
-      - tar xfz $TMPDIR/$STATEFUL_ID.tar.gz -C $RUN_SHARE_DIR/$APP_DIR/
-      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
-'''.format(self.codebuild_role,
-           str(aws_cred_duration))
-
-        return contents
-
-    def _get_codebuildspec_build(self):
-
-        '''
-        #cmd = 'docker run -e METHOD=create --env-file .env --rm -v $RUN_SHARE_DIR:$SHARE_DIR $DOCKER_IMAGE'
-        #cmd = 'docker run '
-        '''
-
-        cmd = 'docker run -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN '
-
-        if self.build_env_vars:
-            for _k,_v in self.build_env_vars.items():
-                if _k in self.skip_env_vars:
-                    continue
-
-                cmd = cmd + "-e {}={} ".format(_k,_v)
-
-        cmd = cmd + ' --rm -v $RUN_SHARE_DIR:$SHARE_DIR $DOCKER_IMAGE'
-
-        contents = '''
-  build:
-    on-failure: ABORT
-    commands:
-      - cd /var/tmp
-      - {}
-'''.format(cmd)
-
-        return contents
-
-    def _get_codebuildspec_postbuild(self):
-
-        contents = '''
-  post_build:
-    commands:
-      - cd $RUN_SHARE_DIR
-      - tar cfz $TMPDIR/$STATEFUL_ID.tar.gz .
-      - aws s3 cp $TMPDIR/$STATEFUL_ID.tar.gz s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID --quiet
-      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
-      - echo "# terraform files uploaded s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID"
-'''
-        return contents
-
-    def get_buildspec(self):
-
-        init_contents = self.get_init_contents()
-        prebuild = self._get_codebuildspec_prebuild()
-        build = self._get_codebuildspec_build()
-        postbuild = self._get_codebuildspec_postbuild()
-
-        contents = init_contents + prebuild + build + postbuild
-
-        return contents
+        return self.codebuild_helper.results
 
 class CodebuildV1(CodebuildParams):
 
@@ -1455,7 +1416,6 @@ environmental variables:
         SHARE_DIR (default is /var/tmp/share) - the shared directory that is shared with the worker during docker container execution
 
        """)
-    exit(4)
 
 if __name__ == '__main__':
 
@@ -1474,17 +1434,12 @@ if __name__ == '__main__':
    
     method = main.inputargs.get("method")
 
-    if not method:
-        print("method/ENV VARIABLE METHOD is needed")
-        exit(4)
-
     if method == "create":
         main.create()
-
     elif method == "destroy":
         main.destroy()
-
     else:
         usage()
         print('method "{}" not supported!'.format(method))
         exit(4)
+    #exit(0)
