@@ -23,7 +23,7 @@ class Config0ResourceTFVars(object):
     Attributes:
         resource_settings (dict):
           A dictionary of resource settings that include most of the settings/variables for interacting with Terraform.
-          The resource settings are retrieved from the environment variable CONFIG0_RESOURCE_SETTINGS_HASH, which is base64encoded
+          The resource settings are retrieved from the environment variable CONFIG0_RESOURCE_SETTINGS_HASH, which is base64 encoded
 
         resource_values (dict):
           A dictionary of "resource" values to insert into the database.
@@ -1394,24 +1394,16 @@ def usage():
     print("""
 script + environmental variables
 
-or
-
-script + json_input (as argument)
-
-environmental variables:
-
-    basic:
-
+basic:
+    main environment variable
         METHOD - create/destroy
-
-        # most common that unpacks all the variables
-        CONFIG0_RESOURCE_SETTINGS - a b64 string of variables for Config0 resource entry
+        CONFIG0_RESOURCE_SETTINGS - The resource settings are retrieved from the environment variable 
+                                     CONFIG0_RESOURCE_SETTINGS_HASH, which is base64 encoded
+                                 
+    other environment variables
         TF_EXEC_TEMPLATE_VARS - environmental variables use for templating terraform files (not common)
-
-    (these are set by the inherited class - ResourceCmdHelper)
-    resourcecmdhelper:
-        STATEFUL_ID - the stateful_id to reference the state of the execution
-        DOCKER_RUNTIME/DOCKER_EXEC_ENV (default elasticdev/terraform-run-env) - the docker container/image to run execution
+        STATEFUL_ID - the stateful_id to reference the instance of the terraform creation/apply
+        DOCKER_RUNTIME/DOCKER_EXEC_ENV (default elasticdev/terraform-run-env) - the docker container/image to run execution if running locally
         DOCKER_ENV_FILE (default .env) - name of the docker env file to create
         SHARE_DIR (default is /var/tmp/share) - the shared directory that is shared with the worker during docker container execution
 
@@ -1419,19 +1411,9 @@ environmental variables:
 
 if __name__ == '__main__':
 
-    try:
-        json_input = sys.argv[1]
-    except:
-        json_input = None
-
     main = Main()
 
-    if json_input:
-        main.set_inputargs(json_input=json_input)
-    else:
-        set_env_vars = [ "CONFIG0_RESOURCE_SETTINGS_HASH" ]
-        main.set_inputargs(set_env_vars=set_env_vars)
-   
+    main.set_inputargs(set_env_vars=[ "CONFIG0_RESOURCE_SETTINGS_HASH" ])
     method = main.inputargs.get("method")
 
     if method == "create":
