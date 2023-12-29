@@ -1425,6 +1425,7 @@ if __name__ == '__main__':
         print('method "{}" not supported!'.format(method))
         exit(4)
 
+    # testtest456
     main.logger.debug("#"*32)
     main.logger.debug("# terraform resource wrapper exiting 0 - success")
     main.logger.debug("#"*32)
