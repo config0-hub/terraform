@@ -941,7 +941,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return _tfvars.keys()
 
-    def _exec_codebuild(self,method="create"):
+    def _exec_codebuild(self,method="create",phase="run"):
 
         self._create_codebuild_env_file()
 
@@ -962,7 +962,12 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         else:
             codebuild = CodebuildV1(**cinputargs)
 
-        return codebuild.run()
+        if phase == "submit":
+            return codebuild.submit()
+        elif phase == "retrieve":
+            return codebuild.retrieve()
+        else:
+            return codebuild.run()
 
     def _exec_tf_apply(self):
 
@@ -1415,20 +1420,15 @@ if __name__ == '__main__':
 
     main.set_inputargs(set_env_vars=[ "CONFIG0_RESOURCE_SETTINGS_HASH" ])
     method = main.inputargs.get("method")
+    phase = main.inputargs.get("phase")
 
     if method == "create":
-        main.create()
+        main.create(phase=phase)
     elif method == "destroy":
-        main.destroy()
+        main.destroy(phase=phase)
     else:
         usage()
         print('method "{}" not supported!'.format(method))
         exit(4)
 
-    main.logger.debug("#"*32)
-    main.logger.debug("# terraform resource wrapper exiting 0 - success")
-    main.logger.debug("# terraform resource wrapper exiting 0 - success")
-    main.logger.debug("# terraform resource wrapper exiting 0 - success")
-    main.logger.debug("# terraform resource wrapper exiting 0 - success")
-    main.logger.debug("#"*32)
     exit(0)
