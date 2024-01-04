@@ -104,6 +104,7 @@ class Config0ResourceTFVars(object):
         ]
 
         # set config0 resource settings
+        # env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
         self._init_config0_resource_settings()
 
     # only use for creation
@@ -138,7 +139,7 @@ class Config0ResourceTFVars(object):
         include_env_vars_keys = None
 
         if self.runtime_settings:
-
+            # ref 4532643623642
             env_vars = self.runtime_settings.get("env_vars")
 
             if env_vars:
@@ -150,12 +151,10 @@ class Config0ResourceTFVars(object):
         if not include_env_vars_keys:
             return
 
-        for docker_env_field in include_env_vars_keys:
+        for _env_var in include_env_vars_keys:
+            _var = _env_var.strip().upper()
 
-            _var = docker_env_field.strip().upper()
-
-            # check on upper case
-            if not os.environ.get(_var):
+            if not os.environ.get(_var):  # check on upper case
                 continue
 
             if _var in self.runtime_env_vars:
@@ -187,7 +186,6 @@ class Config0ResourceTFVars(object):
         self.resource_labels = self.resource_settings.get("resource_labels")
         self.resource_type = self.resource_settings.get("resource_type")
         self.provider = self.resource_settings.get("provider")
-        env_vars = self.resource_settings.get("env_vars")
 
         if not self.resource_type:
             failed_message = "resource_type needs to be set: resource_settings {}".format(self.resource_settings)
@@ -203,13 +201,8 @@ class Config0ResourceTFVars(object):
         except:
             self.runtime_settings = {}
 
-        if not self.runtime_settings:
-
-            try:
-                self.runtime_settings = b64_decode(os.environ.get("CONFIG0_RUNTIME_SETTINGS_HASH"))
-            except:
-                self.runtime_settings = None
-
+        # sets things like stateful_id and ssm_name
+        # as environment variables
         self._set_runtime_settings()
 
         # set terraform settings
@@ -547,10 +540,15 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                            "True",
                            True ]
 
+        # parses env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
+        # sets things like method, phases_params, etc
         Config0ResourceTFVars.__init__(self)
 
         set_must_exists = [ "tmp_bucket",
                             "log_bucket" ]
+
+        self.method = os.environ.get("METHOD")
+        self.phases_params_hash = os.environ.get("phases_params_hash")
 
         if os.environ.get("METHOD") == "create":
             set_must_exists.extend( [ "ssm_name",
@@ -575,6 +573,22 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         self.terraform_tfvars = os.path.join(self.exec_dir,
                                              "terraform.tfvars")
+
+        self.set_phases_info()
+
+    def _set_build_method(self):
+
+        if os.environ.get("USE_CODEBUILD"):  # longer than 900 seconds
+            self.build_method = "codebuild"
+        elif os.environ.get("USE_LAMBDA"):  # shorter than 900 seconds
+            self.build_method = "lambda"
+        elif os.environ.get("USE_AWS"):  # select codebuild or lambda
+            if self.build_timeout > 900:
+                self.build_method = "codebuild"
+            else:
+                self.build_method = "lambda"
+        else:
+            self.build_method = "local"
 
     def add_destroy_params(self,resource):
 
@@ -941,7 +955,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return _tfvars.keys()
 
-    def _exec_codebuild(self,method="create",phase="run"):
+    def _exec_codebuild(self,method="create"):
 
         self._create_codebuild_env_file()
 
@@ -957,14 +971,16 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             cinputargs["ssm_name"] = self.ssm_name 
 
         # we can add other implementation of codebuild with the spec version
-        if self.codebuildspec_version == "1":
-            codebuild = CodebuildV1(**cinputargs)
-        else:
-            codebuild = CodebuildV1(**cinputargs)
+        codebuild = CodebuildV1(**cinputargs)
 
-        if phase == "submit":
+        #if self.codebuildspec_version == "1":
+        #    codebuild = CodebuildV1(**cinputargs)
+        #else:
+        #    codebuild = CodebuildV1(**cinputargs)
+
+        if self.phase == "submit":
             return codebuild.submit()
-        elif phase == "retrieve":
+        elif self.phase == "retrieve":
             return codebuild.retrieve()
         else:
             return codebuild.run()
@@ -972,12 +988,10 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
     def _exec_tf_apply(self):
 
         self._get_runtime_env_vars(method="create")
+        self._set_build_method()
+        results = self._exec_tf(method="create")
 
-        if os.environ.get("USE_CODEBUILD",True):
-            results = self._exec_codebuild(method="create")
-        else:
-            self._create_docker_env_file()
-            results = self._exec_docker_local(method="create")
+        if self.build_method == "local":
             cmd = "rm -rf {}/.terraform".format(self.exec_dir)  # clean up .terraform
             os.system(cmd)
 
@@ -985,11 +999,10 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.append_log(results["output"])
             del results["output"]
 
-        if results.get("status") is False: 
+        if results.get("status") is False:
             self.logger.error("Terraform apply failed here {}!".format(self.run_share_dir))
 
         return results
-
     def _set_tfstate_parse(self):
 
         if not self.tf_settings:
@@ -1073,6 +1086,12 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
     def create(self):
 
+        self._init_create()
+        results = self._exec_tf_apply()
+        self._finalize_create(results)
+
+    def _init_create(self):
+
         if not self.stateful_id:
             self.logger.error("STATEFUL_ID needs to be set")
 
@@ -1086,22 +1105,18 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             failed_message = "terraform directory must exists at {} - something went wrong".format(self.exec_dir)
             raise Exception(failed_message)
 
-        results = self._exec_tf_apply()
+    def _finalize_create(self,results):
 
         # evaluate whether it failed
         self._eval_failure(results)
 
         # it succeeds at this point
-
         # parse tfstate file
-
         os.chdir(self.exec_dir)
         self._set_tfstate_parse()
 
         if self.postscript_path:
-
             self.logger.debug("u4324: getting resource from custom postscript path")
-
             resource = self.get_resources_details()
 
             try:
@@ -1127,22 +1142,26 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         # enter into resource db through
         # file location or through standard out
-        if self.resource_json:
-            self.logger.debug("u4324: inserting retrieved data into {}".format(self.resource_json))
+        self.write_resource_to_json_file(resource,
+                                         must_exist=True)
 
-            to_jsonfile(resource,
-                        self.resource_json)
-        else:
-            raise Exception("resource_json needs to be set")
+    def _exec_tf(self,method):
+
+        if self.build_method == "codebuild":
+            results = self._exec_codebuild(method=method)
+        elif self.build_method == "lambda":
+            results = self._exec_lambda(method=method)
+        else:  # execute locally
+            self._create_docker_env_file()
+            results = self._exec_docker_local(method=method)
+
+        return results
 
     def _exec_tf_destroy(self):
 
         self._get_runtime_env_vars(method="destroy")
-
-        if os.environ.get("USE_CODEBUILD", True):
-            results = self._exec_codebuild(method="destroy")
-        else:
-            results = self._exec_docker_local(method="destroy")
+        self._set_build_method()
+        results = self._exec_tf(method="destroy")
 
         if results.get("status") is False:
             self.logger.error("Terraform apply destroy here {}!".format(self.run_share_dir))
@@ -1418,14 +1437,13 @@ if __name__ == '__main__':
 
     main = Main()
 
-    main.set_inputargs(set_env_vars=[ "CONFIG0_RESOURCE_SETTINGS_HASH" ])
+    main.set_inputargs(set_env_vars=[ "CONFIG0_RESOURCE_SETTINGS_HASH" ])  # sets "config0_resource_settings_hash" in self.inputargs
     method = main.inputargs.get("method")
-    phase = main.inputargs.get("phase")
 
     if method == "create":
-        main.create(phase=phase)
+        main.create()
     elif method == "destroy":
-        main.destroy(phase=phase)
+        main.destroy()
     else:
         usage()
         print('method "{}" not supported!'.format(method))
