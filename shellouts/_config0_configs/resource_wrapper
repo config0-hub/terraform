@@ -548,9 +548,9 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                             "log_bucket" ]
 
         self.method = os.environ.get("METHOD")
-        self.phases_params_hash = os.environ.get("phases_params_hash")
 
-        if os.environ.get("METHOD") == "create":
+
+        if self.method == "create":
             set_must_exists.extend( [ "ssm_name",
                                       "stateful_id",
                                       "remote_stateful_bucket" ] )
@@ -562,7 +562,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                                                   "shelloutconfig"],
                                    set_must_exists=set_must_exists,
                                    set_default_values={ "codebuild_basename":"config0-iac",
-                                                        "codebuildspec_version":"1",
+                                                        "codebuild_region":"us-east-1",
                                                         "failed_destroy":None,
                                                         "ssm_name":None,
                                                         "build_timeout":3600,
@@ -574,7 +574,14 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         self.terraform_tfvars = os.path.join(self.exec_dir,
                                              "terraform.tfvars")
 
-        self.set_phases_info()
+        self.tf_results = None
+
+        # testtest456
+        # phase configuration must come after
+        # ResourceCmdHelper
+        self.set_cur_phase()
+
+    # testtest456
 
     def _set_build_method(self):
 
@@ -962,47 +969,43 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         cinputargs = { "method":method,
                        "build_timeout":self.build_timeout,
                        "remote_stateful_bucket":self.remote_stateful_bucket,
+                       "codebuild_region":self.codebuild_region,
                        "codebuild_basename":self.codebuild_basename }
 
         if self.build_env_vars:
             cinputargs["build_env_vars"] = self.build_env_vars 
 
         if self.ssm_name:
-            cinputargs["ssm_name"] = self.ssm_name 
+            cinputargs["ssm_name"] = self.ssm_name
+
+        if self.phases_info:
+            cinputargs["phases_info"] = self.phases_info
 
         # we can add other implementation of codebuild with the spec version
-        codebuild = CodebuildV1(**cinputargs)
+        codebuild = Codebuild(**cinputargs)
 
-        #if self.codebuildspec_version == "1":
-        #    codebuild = CodebuildV1(**cinputargs)
-        #else:
-        #    codebuild = CodebuildV1(**cinputargs)
+        self._init_phase_run()
 
         if self.phase == "submit":
-            return codebuild.submit()
-        elif self.phase == "retrieve":
-            return codebuild.retrieve()
-        else:
-            return codebuild.run()
+            return codebuild.submit(**self.get_phase_inputargs())
+
+        if self.phase == "retrieve":
+            return codebuild.retrieve(**self.get_phase_inputargs())
+
+        return codebuild.run(**self.get_phase_inputargs())
 
     def _exec_tf_apply(self):
 
         self._get_runtime_env_vars(method="create")
         self._set_build_method()
-        results = self._exec_tf(method="create")
+        self._exec_tf(method="create")
 
         if self.build_method == "local":
             cmd = "rm -rf {}/.terraform".format(self.exec_dir)  # clean up .terraform
             os.system(cmd)
 
-        if results.get("output"):
-            self.append_log(results["output"])
-            del results["output"]
+        return self.tf_results
 
-        if results.get("status") is False:
-            self.logger.error("Terraform apply failed here {}!".format(self.run_share_dir))
-
-        return results
     def _set_tfstate_parse(self):
 
         if not self.tf_settings:
@@ -1066,29 +1069,39 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return resource
 
-    def _eval_failure(self,results):
+    def _eval_failure(self):
 
-        if results.get("status") in [ False, "False" ]:
-            if results.get("failed_message"):
-                failed_message = results.get("failed_message")
-            else:
-                failed_message = "exec tf apply failed"
+        if self.tf_results.get("status") not in [ False, "False" ]:
+            return
 
-            self.logger.error(failed_message)
-            raise Exception(failed_message)
+        # failed at this point
+        if self.tf_results.get("failed_message"):
+            failed_message = self.tf_results.get("failed_message")
+        else:
+            failed_message = "exec tf apply/destroy failed"
 
-            #try:
-            #    exit(results.get("exitcode"))
-            #except:
-            #    exit(9)
+        self.logger.error(failed_message)
+        raise Exception(failed_message)
 
         return
 
     def create(self):
 
         self._init_create()
-        results = self._exec_tf_apply()
-        self._finalize_create(results)
+        self._exec_tf_apply()
+
+        if self.tf_results.get("output"):
+            self.append_log(self.tf_results["output"])
+            del self.tf_results["output"]
+
+        status = self._eval_post_tf("create") # see if phases
+
+        if not status:
+            return status
+
+        self._finalize_create()
+
+        return True
 
     def _init_create(self):
 
@@ -1105,10 +1118,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             failed_message = "terraform directory must exists at {} - something went wrong".format(self.exec_dir)
             raise Exception(failed_message)
 
-    def _finalize_create(self,results):
-
-        # evaluate whether it failed
-        self._eval_failure(results)
+    def _finalize_create(self):
 
         # it succeeds at this point
         # parse tfstate file
@@ -1148,39 +1158,58 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
     def _exec_tf(self,method):
 
         if self.build_method == "codebuild":
-            results = self._exec_codebuild(method=method)
+            self.tf_results = self._exec_codebuild(method=method)
         elif self.build_method == "lambda":
-            results = self._exec_lambda(method=method)
+            self.tf_results = self._exec_lambda(method=method)
         else:  # execute locally
             self._create_docker_env_file()
-            results = self._exec_docker_local(method=method)
+            self.tf_results = self._exec_docker_local(method=method)
 
-        return results
+        return self.tf_results
+
+    def _eval_post_tf(self,method):
+
+        # this is implemented in phases
+        if self.tf_results.get("status") is None and self.phases_params_hash:
+
+            self.write_phases_to_json_file(
+                {
+                    "results":self.tf_results,
+                    "phases_params_hash":self.phases_params_hash
+                }
+            )
+
+            return
+
+        if self.tf_results.get("status") is False:
+            self.logger.error(f"Terraform apply {method} here {self.run_share_dir}!")
+
+        # evaluate whether it failed
+        self._eval_failure()
+
+        return True
 
     def _exec_tf_destroy(self):
 
         self._get_runtime_env_vars(method="destroy")
         self._set_build_method()
-        results = self._exec_tf(method="destroy")
+        self._exec_tf(method="destroy")
 
-        if results.get("status") is False:
-            self.logger.error("Terraform apply destroy here {}!".format(self.run_share_dir))
-
-        return results
+        return self.tf_results
 
     def destroy(self):
 
-        results = self._exec_tf_destroy()
-
-        # evaluate whether it failed
-        self._eval_failure(results)
+        self._exec_tf_destroy()
+        status = self._eval_post_tf("destroy") # see if phases
 
         try:
             os.chdir(self.cwd)
         except:
             os.chdir("/tmp")
 
-        self.print_output(output=results.get("output"))
+        self.print_output(output=self.tf_results.get("output"))
+
+        return status
 
 class CodebuildParams:
 
@@ -1188,8 +1217,7 @@ class CodebuildParams:
 
         self.classname = "CodebuildParams"
 
-        self.method = kwargs.get("method",
-                                 "create")
+        self.method = kwargs.get("method", "create")
 
         self.build_timeout = int(kwargs.get("build_timeout",
                                             1800))
@@ -1198,6 +1226,8 @@ class CodebuildParams:
         self.ssm_name = kwargs.get("ssm_name")
         self.remote_stateful_bucket = kwargs.get("remote_stateful_bucket")
         self.codebuild_basename = kwargs.get("codebuild_basename")
+        self.codebuild_region = kwargs.get("codebuild_region")
+        self.phases_info = kwargs.get("phases_info")
 
         self.codebuild_role = kwargs.get("codebuild_role",
                                          "config0-assume-poweruser")
@@ -1277,11 +1307,14 @@ class CodebuildParams:
 
     def _set_inputargs(self):
 
-        self.buildparams = {"buildspec":self.get_buildspec(),
-                            "remote_stateful_bucket":self.remote_stateful_bucket,
-                            "codebuild_basename":self.codebuild_basename,
-                            "build_timeout":self.build_timeout,
-                            "method":self.method}
+        self.buildparams = {
+                "buildspec":self.get_buildspec(),
+                "remote_stateful_bucket":self.remote_stateful_bucket,
+                "codebuild_basename":self.codebuild_basename,
+                "codebuild_region":self.codebuild_region,
+                "build_timeout":self.build_timeout,
+                "method":self.method
+                }
 
         if self.build_env_vars:
             self.buildparams["build_env_vars"] = self.build_env_vars
@@ -1318,19 +1351,40 @@ phases:
 
         return self._get_tf_from_docker_image()
 
-    def run(self):
+    def _init_codebuild_helper(self):
 
         self._set_inputargs()
         self.codebuild_helper = CodebuildResourceHelper(**self.buildparams)
-        self.codebuild_helper.run()
+
+    def submit(self,**inputargs):
+
+        self._init_codebuild_helper()
+        self.codebuild_helper.submit(**inputargs)
 
         return self.codebuild_helper.results
 
-class CodebuildV1(CodebuildParams):
+    def retrieve(self,**inputargs):
+
+        # get results from phase json file
+        # which should be set
+        self.codebuild_helper = CodebuildResourceHelper(**self.phases_info)
+        self.codebuild_helper.retrieve(**inputargs)
+
+        return self.codebuild_helper.results
+
+    def run(self,**inputargs):
+
+        self._init_codebuild_helper()
+        self.codebuild_helper.run(**inputargs)
+
+        return self.codebuild_helper.results
+
+class Codebuild(CodebuildParams):
 
     def __init__(self,**kwargs):
 
-        self.classname = "CodebuildV1"
+        self.classname = "Codebuild"
+
         CodebuildParams.__init__(self,
                                  **kwargs)
 
