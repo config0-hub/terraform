@@ -1069,22 +1069,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return resource
 
-    def _eval_failure(self):
-
-        if self.tf_results.get("status") not in [ False, "False" ]:
-            return
-
-        # failed at this point
-        if self.tf_results.get("failed_message"):
-            failed_message = self.tf_results.get("failed_message")
-        else:
-            failed_message = "exec tf apply/destroy failed"
-
-        self.logger.error(failed_message)
-        raise Exception(failed_message)
-
-        return
-
     def create(self):
 
         self._init_create()
@@ -1167,35 +1151,9 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return self.tf_results
 
-    def _eval_post_tf(self,method):
+    # testtest456
+    # insert 45245
 
-        # this is implemented in phases
-        if self.tf_results.get("status") is None and (self.phases_params_hash or self.phases_params):
-
-            if self.phases_params_hash:
-                self.write_phases_to_json_file(
-                    {
-                        "results":self.tf_results,
-                        "phases_params_hash":self.phases_params_hash
-                    }
-                )
-            elif self.phases_params:
-                self.write_phases_to_json_file(
-                    {
-                        "results":self.tf_results,
-                        "phases_params_hash":b64_encode(self.phases_params),
-                    }
-                )
-
-            return
-
-        if self.tf_results.get("status") is False:
-            self.logger.error(f"Terraform apply {method} here {self.run_share_dir}!")
-
-        # evaluate whether it failed
-        self._eval_failure()
-
-        return True
 
     def _exec_tf_destroy(self):
 
