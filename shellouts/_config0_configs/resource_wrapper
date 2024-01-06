@@ -589,7 +589,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.build_method = "codebuild"
         elif os.environ.get("USE_LAMBDA"):  # shorter than 900 seconds
             self.build_method = "lambda"
-        elif os.environ.get("USE_AWS"):  # select codebuild or lambda
+        elif os.environ.get("USE_AWS",True):  # select codebuild or lambda
             if self.build_timeout > 900:
                 self.build_method = "codebuild"
             else:
@@ -984,7 +984,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         # we can add other implementation of codebuild with the spec version
         codebuild = Codebuild(**cinputargs)
 
-        self._init_phase_run()
+        self.init_phase_run()
 
         if self.phase == "submit":
             return codebuild.submit(**self.get_phase_inputargs())
@@ -1170,14 +1170,22 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
     def _eval_post_tf(self,method):
 
         # this is implemented in phases
-        if self.tf_results.get("status") is None and self.phases_params_hash:
+        if self.tf_results.get("status") is None and (self.phases_params_hash or self.phases_params):
 
-            self.write_phases_to_json_file(
-                {
-                    "results":self.tf_results,
-                    "phases_params_hash":self.phases_params_hash
-                }
-            )
+            if self.phases_params_hash:
+                self.write_phases_to_json_file(
+                    {
+                        "results":self.tf_results,
+                        "phases_params_hash":self.phases_params_hash
+                    }
+                )
+            elif self.phases_params:
+                self.write_phases_to_json_file(
+                    {
+                        "results":self.tf_results,
+                        "phases_params_hash":b64_encode(self.phases_params),
+                    }
+                )
 
             return
 
