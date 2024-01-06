@@ -964,8 +964,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
     def _exec_codebuild(self,method="create"):
 
-        self._create_codebuild_env_file()
-
         cinputargs = { "method":method,
                        "build_timeout":self.build_timeout,
                        "remote_stateful_bucket":self.remote_stateful_bucket,
@@ -984,14 +982,15 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         # we can add other implementation of codebuild with the spec version
         codebuild = Codebuild(**cinputargs)
 
-        self.init_phase_run()
-
-        if self.phase == "submit":
-            return codebuild.submit(**self.get_phase_inputargs())
-
         if self.phase == "retrieve":
             return codebuild.retrieve(**self.get_phase_inputargs())
 
+        # submit and run required env file
+        if self.phase == "submit":
+            self._create_codebuild_env_file()
+            return codebuild.submit(**self.get_phase_inputargs())
+
+        self._create_codebuild_env_file()
         return codebuild.run(**self.get_phase_inputargs())
 
     def _exec_tf_apply(self):
@@ -1071,21 +1070,23 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
     def create(self):
 
-        self._init_create()
-        self._exec_tf_apply()
+        self.init_phase_run()
+
+        if self.phase == "submit":
+            self._init_create()
+            self._exec_tf_apply()
+        elif self.phase == "retrieve":
+            self._exec_tf_apply()
 
         if self.tf_results.get("output"):
             self.append_log(self.tf_results["output"])
             del self.tf_results["output"]
 
-        status = self._eval_post_tf("create") # see if phases
+        if self._eval_post_tf("create"):
+            self._finalize_create()
+            return True
 
-        if not status:
-            return status
-
-        self._finalize_create()
-
-        return True
+        return
 
     def _init_create(self):
 
