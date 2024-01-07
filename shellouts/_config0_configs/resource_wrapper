@@ -581,8 +581,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         # ResourceCmdHelper
         self.set_cur_phase()
 
-    # testtest456
-
     def _set_build_method(self):
 
         if os.environ.get("USE_CODEBUILD"):  # longer than 900 seconds
@@ -1362,8 +1360,8 @@ class Codebuild(CodebuildParams):
     on-failure: ABORT
     commands:
       - aws s3 cp s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID $TMPDIR/$STATEFUL_ID.tar.gz --quiet
-      - mkdir -p $TMPDIR/terraform
-      - tar xfz $TMPDIR/$STATEFUL_ID.tar.gz -C $TMPDIR/terraform
+      - mkdir -p $TMPDIR/build
+      - tar xfz $TMPDIR/$STATEFUL_ID.tar.gz -C $TMPDIR/build
       - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
 '''
         if self.ssm_name:
@@ -1383,7 +1381,7 @@ class Codebuild(CodebuildParams):
   build:
     on-failure: ABORT
     commands:
-      - cd $TMPDIR/terraform
+      - cd $TMPDIR/build/$APP_DIR
       - /usr/local/bin/terraform init
       - /usr/local/bin/terraform plan -out=tfplan
       - /usr/local/bin/terraform apply tfplan || export FAILED=true
@@ -1396,7 +1394,7 @@ class Codebuild(CodebuildParams):
   build:
     on-failure: ABORT
     commands:
-      - cd $TMPDIR/terraform
+      - cd $TMPDIR/build/$APP_DIR
       - /usr/local/bin/terraform init
       - /usr/local/bin/terraform destroy -auto-approve
 '''
@@ -1410,7 +1408,7 @@ class Codebuild(CodebuildParams):
         contents = '''
   post_build:
     commands:
-      - cd $TMPDIR/terraform
+      - cd $TMPDIR/build
       - tar cfz $TMPDIR/$STATEFUL_ID.tar.gz .
       - aws s3 cp $TMPDIR/$STATEFUL_ID.tar.gz s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID --quiet
       - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
