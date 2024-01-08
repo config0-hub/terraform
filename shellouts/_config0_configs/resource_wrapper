@@ -212,12 +212,17 @@ class Config0ResourceTFVars(object):
         """
         This method gets the Terraform state file.
         """
+
+        if not os.path.exists(self.tf_exec_state_file):
+            return
+
         # read output file
         with open(self.tf_exec_state_file) as json_file:
             data = json.load(json_file)
 
         if not data:
-            msg = "tfstate_to_output: there is no data from {}".format(os.path.join(os.getcwd(), self.tf_exec_state_file))
+            msg = "tfstate_to_output: there is no data from {}".format(os.path.join(os.getcwd(),
+                                                                                    self.tf_exec_state_file))
             self.logger.debug(msg)
 
             return
@@ -1081,8 +1086,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             del self.tf_results["output"]
 
         if self._eval_post_tf("create"):
-            self._finalize_create()
-            return True
+            return self._post_create()
 
         return
 
@@ -1101,7 +1105,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             failed_message = "terraform directory must exists at {} - something went wrong".format(self.exec_dir)
             raise Exception(failed_message)
 
-    def _finalize_create(self):
+    def _post_create(self):
 
         # it succeeds at this point
         # parse tfstate file
@@ -1137,6 +1141,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         # file location or through standard out
         self.write_resource_to_json_file(resource,
                                          must_exist=True)
+
+        return True
 
     def _exec_tf(self,method):
 
