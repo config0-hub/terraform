@@ -554,7 +554,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         self.method = os.environ.get("METHOD")
 
-
         if self.method == "create":
             set_must_exists.extend( [ "ssm_name",
                                       "stateful_id",
@@ -636,6 +635,9 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         if self.destroy_execgroup: 
             resource["destroy"]["execgroup"] = self.destroy_execgroup
+
+
+
 
         return resource
 
