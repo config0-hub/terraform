@@ -1172,7 +1172,13 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
     def destroy(self):
 
-        self._exec_tf_destroy()
+        self.init_phase_run()
+
+        if self.phase == "submit":
+            self._exec_tf_destroy()
+        elif self.phase == "retrieve":
+            self._exec_tf_destroy()
+
         status = self._eval_post_tf("destroy") # see if phases
 
         try:
