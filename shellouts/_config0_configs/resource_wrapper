@@ -996,7 +996,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             return codebuild.submit(**self.get_phase_inputargs())
 
         self._create_codebuild_env_file()
-        return codebuild.run(**self.get_phase_inputargs())
+        return codebuild.run()
 
     def _exec_tf_apply(self):
 
