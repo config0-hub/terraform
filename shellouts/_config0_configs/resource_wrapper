@@ -1146,49 +1146,16 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return True
 
-    def _exec_tf(self,method):
-
-        if self.build_method == "codebuild":
-            self.tf_results = self._exec_codebuild(method=method)
-        elif self.build_method == "lambda":
-            self.tf_results = self._exec_lambda(method=method)
-        else:  # execute locally
-            self._create_docker_env_file()
-            self.tf_results = self._exec_docker_local(method=method)
-
-        return self.tf_results
-
-    # testtest456
-    # insert 45245
 
 
-    def _exec_tf_destroy(self):
 
-        self._get_runtime_env_vars(method="destroy")
-        self._set_build_method()
-        self._exec_tf(method="destroy")
 
-        return self.tf_results
 
-    def destroy(self):
 
-        self.init_phase_run()
 
-        if self.phase == "submit":
-            self._exec_tf_destroy()
-        elif self.phase == "retrieve":
-            self._exec_tf_destroy()
 
-        status = self._eval_post_tf("destroy") # see if phases
 
-        try:
-            os.chdir(self.cwd)
-        except:
-            os.chdir("/tmp")
 
-        self.print_output(output=self.tf_results.get("output"))
-
-        return status
 
 class CodebuildParams:
 
@@ -1223,7 +1190,7 @@ class CodebuildParams:
 
         self._set_tf_version()
         self._set_tmp_tf_bucket_loc()
-    
+
     def _set_tmp_tf_bucket_loc(self):
 
         try:
