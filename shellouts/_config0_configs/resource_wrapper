@@ -580,7 +580,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         self.tf_results = None
 
-        # testtest456
         # phase configuration must come after
         # ResourceCmdHelper
         self.set_cur_phase()
