@@ -8,11 +8,12 @@ from ast import literal_eval
 #from timeout import timeout
 
 from config0_publisher.loggerly import Config0Logger
-from config0_publisher.resource_manage import ResourceCmdHelper
-from config0_publisher.cloud.aws.codebuild import CodebuildResourceHelper
+from config0_publisher.resource.manage import ResourceCmdHelper
 from config0_publisher.serialization import b64_decode
 from config0_publisher.serialization import b64_encode
-from config0_publisher.resource_manage import to_jsonfile
+
+#from config0_publisher.resource.manage import to_jsonfile
+#from config0_publisher.cloud.aws.codebuild import CodebuildResourceHelper
 
 class Config0ResourceTFVars(object):
     """
@@ -565,15 +566,15 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                                    set_variables=["method",
                                                   "shelloutconfig"],
                                    set_must_exists=set_must_exists,
-                                   set_default_values={ "codebuild_basename":"config0-iac",
-                                                        "codebuild_region":"us-east-1",
-                                                        "failed_destroy":None,
-                                                        "ssm_name":None,
-                                                        "build_timeout":3600,
-                                                        "build_image":"aws/codebuild/standard:4.0",
-                                                        "compute_type":"BUILD_GENERAL1_SMALL",
-                                                        "image_type":"LINUX_CONTAINER",
-                                                        "buildspec_file":"buildspec.yml"})
+                                   set_default_values={
+                                       "failed_destroy": None,
+                                       "ssm_name": None,
+                                       "aws_region":"us-east-1",
+                                       "build_timeout":3600,
+                                       "build_image":"aws/codebuild/standard:4.0",
+                                       "compute_type":"BUILD_GENERAL1_SMALL",
+                                       "image_type":"LINUX_CONTAINER",
+                                       "buildspec_file":"buildspec.yml"})
 
         self.terraform_tfvars = os.path.join(self.exec_dir,
                                              "terraform.tfvars")
@@ -635,9 +636,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         if self.destroy_execgroup: 
             resource["destroy"]["execgroup"] = self.destroy_execgroup
 
-
-
-
         return resource
 
     def _get_runtime_env_vars(self,method="create"):
@@ -683,38 +681,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return 
 
-    def _create_docker_env_file(self):
-
-        # note: self.docker_env_file is set by
-        # "_get_docker_env_filepath" in ResourceCmdHelper
-        if not self.build_env_vars.items():
-            return 
-
-        file_obj = open(self.docker_env_file,"w")
-
-        for _k,_v in self.build_env_vars.items():
-            file_obj.write("\n")
-            file_obj.write("{}={}".format(_k,_v))
-
-        file_obj.close()
-
-    def _create_codebuild_env_file(self):
-
-        if not self.build_env_vars:
-            return 
-
-        env_file = os.path.join(self.run_share_dir,
-                                self.app_dir,
-                                "build_env_vars.env")
-
-        file_obj = open(env_file,"w")
-
-        for _k,_v in self.build_env_vars.items():
-            file_obj.write("\n")
-            file_obj.write("{}={}".format(_k,_v))
-
-        file_obj.close()
-
     def _aggregate_output(self,results,output=None):
 
         if not output:
@@ -732,79 +698,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             return output
 
         return output + results.get("output")
-
-    def _get_docker_run_cmd(self,**kwargs):
-
-        share_dir = kwargs.get("share_dir",
-                               self.share_dir)
-
-        run_share_dir = kwargs.get("run_share_dir",
-                                   self.run_share_dir)
-
-        docker_env_file = kwargs.get("docker_env_file",
-                                     self.docker_env_file)
-
-        if not os.path.exists(docker_env_file):
-
-            self.logger.error("Cannot find environmental file {}".format(docker_env_file))
-
-            if method:
-                cmd = 'docker run -e METHOD="{}" --rm -v {}:{} {}'.format(method,
-                                                                          run_share_dir,
-                                                                          share_dir,
-                                                                          self.docker_image)
-            else:
-                cmd = 'docker run --rm -v {}:{} {}'.format(run_share_dir,
-                                                           share_dir,
-                                                           self.docker_image)
-        else:
-            if method:
-                cmd = 'docker run -e METHOD="{}" --env-file {} --rm -v {}:{} {}'.format(method,
-                                                                                        docker_env_file,
-                                                                                        run_share_dir,
-                                                                                        share_dir,
-                                                                                        self.docker_image)
-            else:
-                cmd = 'docker run --env-file {} --rm -v {}:{} {}'.format(docker_env_file,
-                                                                         run_share_dir,
-                                                                         share_dir,
-                                                                         self.docker_image)
-
-        return cmd
-
-    def _exec_docker_local(self,method=None,retries=None):
-
-        os.chdir(self.run_share_dir)
-
-        cmd = self._get_docker_run_cmd()
-
-        self.logger.debug(cmd)
-
-        if method == "destroy" and retries: 
-            retries = 6
-
-        if not retries: 
-            retries = 1
-
-        output = None
-
-        for retry in range(retries):
-
-            results = self.execute(cmd,
-                                   output_to_json=False,
-                                   exit_error=False)
-
-            output = self._aggregate_output(results,
-                                            output=output)
-
-            if not results or results.get("status") is False:
-                continue
-
-            break
-
-        results["output"] = output
-
-        return results
 
     def _tf_map_list_fix_value(self,_value):
 
@@ -966,43 +859,13 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return _tfvars.keys()
 
-    def _exec_codebuild(self,method="create"):
-
-        cinputargs = { "method":method,
-                       "build_timeout":self.build_timeout,
-                       "remote_stateful_bucket":self.remote_stateful_bucket,
-                       "codebuild_region":self.codebuild_region,
-                       "codebuild_basename":self.codebuild_basename }
-
-        if self.build_env_vars:
-            cinputargs["build_env_vars"] = self.build_env_vars 
-
-        if self.ssm_name:
-            cinputargs["ssm_name"] = self.ssm_name
-
-        if self.phases_info:
-            cinputargs["phases_info"] = self.phases_info
-
-        # we can add other implementation of codebuild with the spec version
-        codebuild = Codebuild(**cinputargs)
-
-        if self.phase == "retrieve":
-            return codebuild.retrieve(**self.get_phase_inputargs())
-
-        # submit and run required env file
-        if self.phase == "submit":
-            self._create_codebuild_env_file()
-            return codebuild.submit(**self.get_phase_inputargs())
-
-        self._create_codebuild_env_file()
-        return codebuild.run()
-
     def _exec_tf_apply(self):
 
         self._get_runtime_env_vars(method="create")
         self._set_build_method()
         self._exec_tf(method="create")
 
+        # we clean if local build
         if self.build_method == "local":
             cmd = "rm -rf {}/.terraform".format(self.exec_dir)  # clean up .terraform
             os.system(cmd)
@@ -1148,272 +1011,99 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return True
 
+    #####################################
+    # move to separate DockerLocalBuild
+    #####################################
+    def _create_docker_env_file(self):
 
-
-
-
-
-
-
-
-
-
-
-class CodebuildParams:
-
-    def __init__(self,**kwargs):
-
-        self.classname = "CodebuildParams"
-
-        self.method = kwargs.get("method", "create")
-
-        self.build_timeout = int(kwargs.get("build_timeout",
-                                            1800))
-
-        self.build_env_vars = kwargs.get("build_env_vars")
-        self.ssm_name = kwargs.get("ssm_name")
-        self.remote_stateful_bucket = kwargs.get("remote_stateful_bucket")
-        self.codebuild_basename = kwargs.get("codebuild_basename")
-        self.codebuild_region = kwargs.get("codebuild_region")
-        self.phases_info = kwargs.get("phases_info")
-
-        self.codebuild_role = kwargs.get("codebuild_role",
-                                         "config0-assume-poweruser")
-
-        self.skip_env_vars = [ "AWS_SECRET_ACCESS_KEY" ]
-
-        if not self.build_env_vars:
-            self.build_env_vars = {}
-
-        self._override_env_var_method()
-
-        self.tf_bucket_key = None
-        self.tf_bucket_path = None
-
-        self._set_tf_version()
-        self._set_tmp_tf_bucket_loc()
-
-    def _set_tmp_tf_bucket_loc(self):
-
-        try:
-            self.tmp_bucket = self.build_env_vars["TMP_BUCKET"]
-        except:
-            self.tmp_bucket = None
-
-        if self.tmp_bucket:
-            self.tf_bucket_key = f"downloads/terraform/{self.tf_version}"
-            self.tf_bucket_path = f"s3://{self.tmp_bucket}/{self.tf_bucket_key}"
-
-    def _set_tf_version(self):
-
-        try:
-            self.tf_version = self.build_env_vars["DOCKER_IMAGE"].split(":")[-1]
-        except:
-            self.tf_version = "1.5.4"
-
-    def _override_env_var_method(self):
-        
-        if not self.build_env_vars.get("METHOD"):
+        # note: self.docker_env_file is set by
+        # "_get_docker_env_filepath" in ResourceCmdHelper
+        if not self.build_env_vars.items():
             return
 
-        if self.method == "destroy":
-            self.build_env_vars["METHOD"] = "destroy"
-        elif self.method == "create":
-            self.build_env_vars["METHOD"] = "create"
+        file_obj = open(self.docker_env_file,"w")
 
-    def _get_tf_direct(self):
+        for _k,_v in self.build_env_vars.items():
+            file_obj.write("\n")
+            file_obj.write("{}={}".format(_k,_v))
 
-        contents = '''
-  install:
-    commands:
-      - which zip || apt-get update
-      - which zip || apt-get install -y unzip zip
-      - cd $TMPDIR
-      - aws s3 cp {loc} terraform.zip --quiet || export DNE="True"
-      - if [ ! -z "$DNE" ]; then echo "downloading tf {ver} from hashicorp"; fi
-      - if [ ! -z "$DNE" ]; then curl -L -s https://releases.hashicorp.com/terraform/{ver}/terraform_{ver}_linux_amd64.zip -o terraform.zip; fi
-      - if [ ! -z "$DNE" ]; then aws s3 cp terraform.zip {loc} --quiet ; fi
-      - unzip terraform.zip
-      - mv terraform /usr/local/bin/terraform
-'''.format(loc=self.tf_bucket_path,
-           ver=self.tf_version)
+        file_obj.close()
 
-        return contents
+    def _get_docker_run_cmd(self,**kwargs):
 
-    def _get_tf_from_docker_image(self):
+        share_dir = kwargs.get("share_dir",
+                               self.share_dir)
 
-        contents = '''
-  install:
-    commands:
-      - docker run --name temp-copy-image -d --entrypoint /bin/sleep {} 900
-      - docker cp temp-copy-image:/bin/terraform /usr/local/bin/terraform
-      - docker rm -fv temp-copy-image
-      - terraform --version
-'''.format(self.build_env_vars["DOCKER_IMAGE"])
+        run_share_dir = kwargs.get("run_share_dir",
+                                   self.run_share_dir)
 
-        return contents
+        docker_env_file = kwargs.get("docker_env_file",
+                                     self.docker_env_file)
 
-    def _set_inputargs(self):
+        if not os.path.exists(docker_env_file):
 
-        self.buildparams = {
-                "buildspec":self.get_buildspec(),
-                "remote_stateful_bucket":self.remote_stateful_bucket,
-                "codebuild_basename":self.codebuild_basename,
-                "codebuild_region":self.codebuild_region,
-                "build_timeout":self.build_timeout,
-                "method":self.method
-                }
+            self.logger.error("Cannot find environmental file {}".format(docker_env_file))
 
-        if self.build_env_vars:
-            self.buildparams["build_env_vars"] = self.build_env_vars
-
-        return self.buildparams
-
-    def get_init_contents(self):
-
-        contents = '''
-version: 0.2
-
-env:
-  variables:
-    TMPDIR: /tmp
-'''
-        if self.ssm_name:
-            ssm_params_content = '''
-  parameter-store:
-    SSM_VALUE: $SSM_NAME
-'''
-            contents = contents + ssm_params_content
-
-        final_contents = '''
-phases:
-'''
-        contents = contents + final_contents
-
-        return contents
-
-    def get_install_tf(self,source="direct"):
-
-        if source == "direct":
-            return self._get_tf_direct()
-
-        return self._get_tf_from_docker_image()
-
-    def _init_codebuild_helper(self):
-
-        self._set_inputargs()
-        self.codebuild_helper = CodebuildResourceHelper(**self.buildparams)
-
-    def submit(self,**inputargs):
-
-        self._init_codebuild_helper()
-        self.codebuild_helper.submit(**inputargs)
-
-        return self.codebuild_helper.results
-
-    def retrieve(self,**inputargs):
-
-        # get results from phase json file
-        # which should be set
-        self.codebuild_helper = CodebuildResourceHelper(**self.phases_info)
-        self.codebuild_helper.retrieve(**inputargs)
-
-        return self.codebuild_helper.results
-
-    def run(self,**inputargs):
-
-        self._init_codebuild_helper()
-        self.codebuild_helper.run(**inputargs)
-
-        return self.codebuild_helper.results
-
-class Codebuild(CodebuildParams):
-
-    def __init__(self,**kwargs):
-
-        self.classname = "Codebuild"
-
-        CodebuildParams.__init__(self,
-                                 **kwargs)
-
-    def _get_codebuildspec_prebuild(self):
-
-        contents = '''
-  pre_build:
-    on-failure: ABORT
-    commands:
-      - aws s3 cp s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID $TMPDIR/$STATEFUL_ID.tar.gz --quiet
-      - mkdir -p $TMPDIR/build
-      - tar xfz $TMPDIR/$STATEFUL_ID.tar.gz -C $TMPDIR/build
-      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
-'''
-        if self.ssm_name:
-            ssm_params_content = '''
-      - echo $SSM_VALUE | base64 -d > exports.env && chmod 755 exports.env
-      - . ./exports.env 
-'''
-            contents = contents + ssm_params_content
-
-        return contents
-
-    def _get_codebuildspec_build(self):
-
-        if self.method == "create":
-
-            contents = '''
-  build:
-    on-failure: ABORT
-    commands:
-      - cd $TMPDIR/build/$APP_DIR
-      - /usr/local/bin/terraform init
-      - /usr/local/bin/terraform plan -out=tfplan
-      - /usr/local/bin/terraform apply tfplan || export FAILED=true
-      - if [ ! -z "$FAILED" ]; then /usr/local/bin/terraform destroy -auto-approve; fi
-      - if [ ! -z "$FAILED" ]; then echo "terraform apply failed - destroying and exiting with failed" && exit 9; fi
-'''
-        elif self.method == "destroy":
-
-            contents = '''
-  build:
-    on-failure: ABORT
-    commands:
-      - cd $TMPDIR/build/$APP_DIR
-      - /usr/local/bin/terraform init
-      - /usr/local/bin/terraform destroy -auto-approve
-'''
+            if method:
+                cmd = 'docker run -e METHOD="{}" --rm -v {}:{} {}'.format(method,
+                                                                          run_share_dir,
+                                                                          share_dir,
+                                                                          self.docker_image)
+            else:
+                cmd = 'docker run --rm -v {}:{} {}'.format(run_share_dir,
+                                                           share_dir,
+                                                           self.docker_image)
         else:
-            raise Exception("method needs to be create/destroy")
+            if method:
+                cmd = 'docker run -e METHOD="{}" --env-file {} --rm -v {}:{} {}'.format(method,
+                                                                                        docker_env_file,
+                                                                                        run_share_dir,
+                                                                                        share_dir,
+                                                                                        self.docker_image)
+            else:
+                cmd = 'docker run --env-file {} --rm -v {}:{} {}'.format(docker_env_file,
+                                                                         run_share_dir,
+                                                                         share_dir,
+                                                                         self.docker_image)
 
-        return contents
+        return cmd
 
-    def _get_codebuildspec_postbuild(self):
+    def _exec_docker_local(self,method=None,retries=None):
 
-        contents = '''
-  post_build:
-    commands:
-      - cd $TMPDIR/build
-      - tar cfz $TMPDIR/$STATEFUL_ID.tar.gz .
-      - aws s3 cp $TMPDIR/$STATEFUL_ID.tar.gz s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID --quiet
-      - rm -rf $TMPDIR/$STATEFUL_ID.tar.gz
-      - echo "# terraform files uploaded s3://$REMOTE_STATEFUL_BUCKET/$STATEFUL_ID"
+        os.chdir(self.run_share_dir)
 
-'''
-        return contents
+        cmd = self._get_docker_run_cmd()
 
-    def get_buildspec(self):
+        self.logger.debug(cmd)
 
-        init_contents = self.get_init_contents()
-        install_tf = self.get_install_tf()
-        prebuild = self._get_codebuildspec_prebuild()
-        build = self._get_codebuildspec_build()
-        postbuild = self._get_codebuildspec_postbuild()
+        if method == "destroy" and retries:
+            retries = 6
 
-        if self.method == "create":
-            contents = init_contents + install_tf + prebuild + build + postbuild
-        else:
-            contents = init_contents + install_tf + prebuild + build  # if destroy, we skip postbuild
+        if not retries:
+            retries = 1
 
-        return contents
+        output = None
+
+        for retry in range(retries):
+
+            results = self.execute(cmd,
+                                   output_to_json=False,
+                                   exit_error=False)
+
+            output = self._aggregate_output(results,
+                                            output=output)
+
+            if not results or results.get("status") is False:
+                continue
+
+            break
+
+        results["output"] = output
+
+        return results
+
+
+    #####################################
 
 def usage():
 
