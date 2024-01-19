@@ -2,9 +2,9 @@
 
 import os
 import json
-import sys
-from time import sleep
 from ast import literal_eval
+#import sys
+#from time import sleep
 #from timeout import timeout
 
 from config0_publisher.loggerly import Config0Logger
@@ -39,7 +39,7 @@ class Config0ResourceTFVars(object):
         do_not_display (list): A list of keys not to display when converting Terraform state files to resources values (insert into database).
         tf_exec_map_keys (dict): A dictionary of keys to map when converting Terraform state files to resources values (insert into database).
         tf_exec_state_file (str): The Terraform state file path.
-        runtime_settings (dict):
+        tf_runtime (dict):
            A dictionary of runtime settings retrieved from resource_settings.
            This includes settings like the environment variables when executing terraform
         resource_labels (dict):
@@ -91,7 +91,7 @@ class Config0ResourceTFVars(object):
 
         self.add_resource_inputargs = {}
         self.resource_settings = {}
-        self.runtime_settings = {}  # => resource_settings -> runtime_settings (docker)
+        self.tf_runtime = {}  # => resource_settings -> tf_runtime (docker)
         self.resource_values = None
         self.resource_labels = None
         self.resource_type = None
@@ -131,37 +131,19 @@ class Config0ResourceTFVars(object):
             self.postscript = self.tf_settings["tf_exec_postscript"]
 
     # only use for creation
-    def _set_runtime_settings(self):
+    def _set_tf_runtime(self):
         """
         This method sets the runtime settings.
         """
         self.runtime_env_vars = {}
 
-        include_env_vars_keys = None
-
-        if self.runtime_settings:
+        if self.tf_runtime:
             # ref 4532643623642
-            env_vars = self.runtime_settings.get("env_vars")
+            env_vars = self.tf_runtime.get("env_vars")
 
             if env_vars:
                 for _k, _v in env_vars.items():
                     self.runtime_env_vars[_k.upper()] = _v
-
-            include_env_vars_keys = self.runtime_settings.get("include_env_vars_keys")
-
-        if not include_env_vars_keys:
-            return
-
-        for _env_var in include_env_vars_keys:
-            _var = _env_var.strip().upper()
-
-            if not os.environ.get(_var):  # check on upper case
-                continue
-
-            if _var in self.runtime_env_vars:
-                continue
-
-            self.runtime_env_vars[_var] = os.environ[_var]
 
     def _init_config0_resource_settings(self):
         """
@@ -198,13 +180,13 @@ class Config0ResourceTFVars(object):
         # set docker settings
         try:
             # ref 4353453246
-            self.runtime_settings = self.resource_settings["runtime"]
+            self.tf_runtime = self.resource_settings["runtime"]
         except:
-            self.runtime_settings = {}
+            self.tf_runtime = {}
 
         # sets things like stateful_id and ssm_name
         # as environment variables
-        self._set_runtime_settings()
+        self._set_tf_runtime()
 
         # set terraform settings
         self._set_tf_settings()
@@ -523,11 +505,11 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         self.logger.debug("Instantiating %s" % self.classname)
 
-        self.exclude_tfvars = None
         self.postscript = None
         self.postscript_path = None
         self.runtime_env_vars = None
-        self.build_env_vars = None
+        self.exclude_tfvars = []
+        self.build_env_vars = {}
 
         self.bool_none = [ "None",
                            "none",
