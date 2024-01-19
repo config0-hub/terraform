@@ -860,23 +860,23 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             return
 
         # new version of resource setttings
-        resource_params = self.tf_settings.get("resource_params")
+        resource_configs = self.tf_settings.get("resource_configs")
 
-        if resource_params and resource_params.get("include_raw"):
+        if resource_configs and resource_configs.get("include_raw"):
             self.tf_exec_include_raw = True
 
-        if resource_params and resource_params.get("add_keys"):
-            self.tf_exec_add_keys = resource_params["add_keys"]
-        elif resource_params and resource_params.get("include_keys"):
-            self.tf_exec_add_keys = resource_params["include_keys"]
+        if resource_configs and resource_configs.get("add_keys"):
+            self.tf_exec_add_keys = resource_configs["add_keys"]
+        elif resource_configs and resource_configs.get("include_keys"):
+            self.tf_exec_add_keys = resource_configs["include_keys"]
 
-        if resource_params and resource_params.get("remove_keys"):
-            self.tf_exec_remove_keys.extend(resource_params["remove_keys"])
-        elif resource_params and resource_params.get("exclude_keys"):
-            self.tf_exec_remove_keys.extend(resource_params["exclude_keys"])
+        if resource_configs and resource_configs.get("remove_keys"):
+            self.tf_exec_remove_keys.extend(resource_configs["remove_keys"])
+        elif resource_configs and resource_configs.get("exclude_keys"):
+            self.tf_exec_remove_keys.extend(resource_configs["exclude_keys"])
 
-        if resource_params and resource_params.get("map_keys"):
-            self.tf_exec_map_keys = resource_params["map_keys"]
+        if resource_configs and resource_configs.get("map_keys"):
+            self.tf_exec_map_keys = resource_configs["map_keys"]
 
     def add_destroy_params(self,resource):
 
