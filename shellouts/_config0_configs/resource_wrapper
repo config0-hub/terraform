@@ -30,7 +30,7 @@ class Config0ResourceTFVars(object):
           A dictionary of "resource" values to insert into the database.
           It allows Terraform infrastructures values to be queried, retrieved, and used in other Config0 Terraform imported templates.
 
-        tf_settings (dict): A dictionary of Terraform settings retrieved from resource_settings.
+        tf_configs (dict): A dictionary of Terraform settings retrieved from resource_settings.
         tf_exec_skip_keys (list): A list of keys to skip when converting Terraform state files to resources values (insert into database)
         tf_output_skip_keys (list): A list of output keys to skip when converting Terraform state files to resources values (insert into database).
         tf_exec_include_raw (bool): A flag indicating whether to include the raw Terraform state file in resources values (insert into database).
@@ -55,7 +55,7 @@ class Config0ResourceTFVars(object):
 
         self.classname = "Config0ResourceTFVars"
 
-        self.tf_settings = {}  # => resource_settings -> tf_settings
+        self.tf_configs = {}
 
         self.tf_exec_skip_keys = [
             "sensitive_attributes",
@@ -87,11 +87,10 @@ class Config0ResourceTFVars(object):
 
         self.tf_exec_map_keys = {}
 
-        self.tf_exec_state_file = os.environ.get("TF_EXEC_STATE_FILE", "terraform.tfstate")
+        self.tf_exec_state_file = os.environ.get("TF_EXEC_STATE_FILE",
+                                                 "terraform.tfstate")
 
         self.add_resource_inputargs = {}
-        self.resource_settings = {}
-        self.tf_runtime = {}  # => resource_settings -> tf_runtime (docker)
         self.resource_values = None
         self.resource_labels = None
         self.resource_type = None
@@ -109,87 +108,87 @@ class Config0ResourceTFVars(object):
         self._init_config0_resource_settings()
 
     # only use for creation
-    def _set_tf_settings(self):
+    def _set_tf_configs(self):
         """
         This method sets the Terraform settings.
         """
         try:
-            self.tf_settings = self.resource_settings["terraform"]
+            self.tf_configs = self.resource_exec["tf_configs"]
         except:
-            self.tf_settings = {}
+            self.tf_configs = {}
 
-        if not self.tf_settings:
+        if not self.tf_configs:
             return
 
-        self.terraform_type = self.tf_settings.get("terraform_type")
+        self.terraform_type = self.tf_configs.get("terraform_type")
 
         # ResourceCmdHelper is not terraform aware
         # so we map it resource accordingly
-        if self.tf_settings.get("tf_exec_postscript_path"):
-            self.postscript_path = self.tf_settings["tf_exec_postscript_path"]
-        elif self.tf_settings.get("tf_exec_postscript"):
-            self.postscript = self.tf_settings["tf_exec_postscript"]
+        if self.tf_configs.get("tf_exec_postscript_path"):
+            self.postscript_path = self.tf_configs["tf_exec_postscript_path"]
+        elif self.tf_configs.get("tf_exec_postscript"):
+            self.postscript = self.tf_configs["tf_exec_postscript"]
 
     # only use for creation
-    def _set_tf_runtime(self):
+    def _set_runtime_settings(self):
         """
         This method sets the runtime settings.
         """
+
         self.runtime_env_vars = {}
 
-        if self.tf_runtime:
-            # ref 4532643623642
-            env_vars = self.tf_runtime.get("env_vars")
+        if not self.runtime_exec:
+            return
 
-            if env_vars:
-                for _k, _v in env_vars.items():
-                    self.runtime_env_vars[_k.upper()] = _v
+        env_vars = self.runtime_exec.get("env_vars")  # ref 4532643623642
+
+        if not env_vars:
+            return
+
+        for _k, _v in env_vars.items():
+            self.runtime_env_vars[_k.upper()] = _v
 
     def _init_config0_resource_settings(self):
         """
         This method initializes the Config0 resource settings.
         """
-        # unpackage config0 resource settings
-        try:
-            self.resource_settings = b64_decode(self.inputargs.get("config0_resource_settings_hash"))
-        except:
-            self.resource_settings = {}
 
-        if not self.resource_settings:
+        _settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
 
-            try:
-                self.resource_settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
-            except:
-                self.resource_settings = {}
+        resource_exec_hash = _settings.get("resource_exec_hash")
+        runtime_exec_hash  = _settings.get("runtime_exec_hash")
+        common_exec_hash  = _settings.get("common_exec_hash")
 
-        if not self.resource_settings:
-            return
+        if resource_exec_hash:
+            os.environ["CONFIG0_RESOURCE_EXEC_HASH"] = resource_exec_hash
+            self.resource_exec = b64_decode(resource_exec_hash)
 
-        self.resource_values = self.resource_settings.get("resource_values")
-        self.resource_labels = self.resource_settings.get("resource_labels")
-        self.resource_type = self.resource_settings.get("resource_type")
-        self.provider = self.resource_settings.get("provider")
+        if runtime_exec_hash:
+            os.environ["CONFIG0_RUNTIME_EXEC_HASH"] = runtime_exec_hash
+            self.runtime_exec = b64_decode(runtime_exec_hash)
+
+        if common_exec_hash:
+            os.environ["CONFIG0_COMMON_EXEC_HASH"] = common_exec_hash
+            #common_exec = b64_decode(common_exec_hash)
+
+        self.method = self.resource_exec.get("method")
+        self.provider = self.resource_exec.get("provider")
+        self.resource_type = self.resource_exec.get("type")
+        self.resource_values = self.resource_exec.get("values")
+        self.resource_labels = self.resource_exec.get("labels")
 
         if not self.resource_type:
-            failed_message = "resource_type needs to be set: resource_settings {}".format(self.resource_settings)
-            raise Exception(failed_message)
+            raise Exception("resource_type needs to be set")
 
         if not self.provider:
-            self.logger.error("provider should be set: resource_settings {}".format(self.resource_settings))
-
-        # set docker settings
-        try:
-            # ref 4353453246
-            self.tf_runtime = self.resource_settings["runtime"]
-        except:
-            self.tf_runtime = {}
+            self.logger.error("provider should be set")
 
         # sets things like stateful_id and ssm_name
         # as environment variables
-        self._set_tf_runtime()
+        self._set_runtime_settings()
 
         # set terraform settings
-        self._set_tf_settings()
+        self._set_tf_configs()
 
     def _get_tfstate_file(self):
         """
@@ -216,15 +215,12 @@ class Config0ResourceTFVars(object):
         """
         This method inserts the resource values into the output values.
         """
-        self.logger.debug("tfstate_to_output: resource_values {}".format(self.resource_values))
-
         if not self.resource_values:
             return
 
         for _k, _v in self.resource_values.items():
-
             self.logger.debug(
-                "tfstate_to_output: resource values key \"{}\" -> value \"{}\"".format(_k, _v)
+                f"resource values: key \"{_k}\" -> value \"{_v}\""
             )
             values[_k] = _v
 
@@ -251,8 +247,7 @@ class Config0ResourceTFVars(object):
             return
 
         for _k,_v in self.resource_labels.items():
-            self.logger.debug('tfstate_to_output: resource labels key "{}" -> value "{}"'.format("label-{}".format(_k),
-                                                                                                 _v))
+            self.logger.debug(f'resource labels: key "{"label-{}".format(_k)}" -> value "{_v}"')
             values["label-{}".format(_k)] = _v
 
     def _insert_tf_outputs(self,values):
@@ -288,7 +283,7 @@ class Config0ResourceTFVars(object):
         else:
             data = self._get_tfstate_file()
 
-        self.logger.debug("tfstate_to_output: include raw = True")
+        self.logger.debug("include raw = True")
 
         values["raw"] = {"terraform":b64_encode(data)}
 
@@ -300,7 +295,7 @@ class Config0ResourceTFVars(object):
                 continue
 
             self.logger.debug("-" * 32)
-            self.logger.debug("tfstate_to_output: instance attribute keys")
+            self.logger.debug("instance attribute keys")
             self.logger.debug(list(resource["instances"][0]["attributes"].keys()))
             self.logger.debug("-" * 32)
 
@@ -315,21 +310,21 @@ class Config0ResourceTFVars(object):
                         continue
 
                     if _key in self.tf_exec_skip_keys:
-                        self.logger.debug('tfstate_to_output/tf_exec_skip_keys: tf instance attribute key "{}" skipped'.format(_key))
+                        self.logger.debug('tf_exec_skip_keys: tf instance attribute key "{}" skipped'.format(_key))
                         continue
     
                     # we add if tf_exec_add_key not set, all, or key is in it 
                     if not self.tf_exec_add_keys:
-                        _added_bc = "tfstate_to_output/tf_exec_add_keys=None"
+                        _added_bc = "tf_exec_add_keys=None"
                     elif self.tf_exec_add_keys == "all":
-                        _added_bc = "tfstate_to_output/tf_exec_add_keys=all"
+                        _added_bc = "tf_exec_add_keys=all"
                     elif _key in self.tf_exec_add_keys:
-                        _added_bc = "tfstate_to_output/tf_exec_add_keys/key{} found".format(_key)
+                        _added_bc = "tf_exec_add_keys/key{} found".format(_key)
                     else:
                         _added_bc = None
 
                     if not _added_bc:
-                        self.logger.debug("tfstate_to_output/tf_exec_add_keys: key {} skipped".format(_key))
+                        self.logger.debug("tf_exec_add_keys: key {} skipped".format(_key))
                         continue
 
                     self.logger.debug('{}: tf key "{}" -> value "{}" added to resource values'.format(_added_bc,
@@ -382,7 +377,7 @@ class Config0ResourceTFVars(object):
             '''
 
             if values.get(_insertkey):
-                self.logger.warn("tfstate_to_output: mapped key {} already exists - clobbering".format(_insertkey))
+                self.logger.warn("mapped key {} already exists - clobbering".format(_insertkey))
                 #continue
     
             # see if _refkey is a subkey
@@ -394,8 +389,8 @@ class Config0ResourceTFVars(object):
                 for _sub_insertkey,_sub_refkey in _refkey.items():
 
                     if not values.get(_sub_refkey):
-                        self.logger.debug('tfstate_to_output: mapped key sub_insertkey {} sub_refkey {} not found'.format(_sub_insertkey,
-                                                                                                                          _sub_refkey))
+                        self.logger.debug('mapped key sub_insertkey {} sub_refkey {} not found'.format(_sub_insertkey,
+                                                                                                       _sub_refkey))
                     # revisit 432523543245
                     # ref 432523543245
                     # do we want to nest 2 levels deep?
@@ -403,30 +398,30 @@ class Config0ResourceTFVars(object):
                         _sub_insertkey2,_subrefkey2 = values[_sub_refkey].split(",")
 
                         if _sub_insertkey2 not in self.do_not_display:
-                            self.logger.debug('tfstate_to_output: mapped key ["{}"]["{}"]["{}"] -> value "{}"'.format(_insertkey,
-                                                                                                                      _sub_insertkey,
-                                                                                                                      _sub_insertkey2,
-                                                                                                                      values[_sub_refkey.strip()][_subrefkey2.strip()]))
+                            self.logger.debug('mapped key ["{}"]["{}"]["{}"] -> value "{}"'.format(_insertkey,
+                                                                                                   _sub_insertkey,
+                                                                                                   _sub_insertkey2,
+                                                                                                   values[_sub_refkey.strip()][_subrefkey2.strip()]))
 
                         values[_insertkey][_sub_insertkey] = values[_sub_refkey.strip()][_subrefkey2.strip()]
 
                     else:
                         if _sub_insertkey not in self.do_not_display:
-                            self.logger.debug('tfstate_to_output: mapped key ["{}"]["{}"] -> value "{}"'.format(_insertkey,
-                                                                                                                _sub_insertkey,
-                                                                                                                values[_sub_refkey.strip()]))
+                            self.logger.debug('mapped key ["{}"]["{}"] -> value "{}"'.format(_insertkey,
+                                                                                             _sub_insertkey,
+                                                                                             values[_sub_refkey.strip()]))
 
                         values[_insertkey][_sub_insertkey] = values[_sub_refkey]
     
             elif values.get(_refkey):
                 if _refkey not in self.do_not_display:
-                    self.logger.debug('tfstate_to_output: mapped key ["{}"] -> value "{}"'.format(_insertkey,_refkey))
+                    self.logger.debug('mapped key ["{}"] -> value "{}"'.format(_insertkey,_refkey))
 
                 values[_insertkey] = values[_refkey]
 
             elif not values.get(_refkey):
-                self.logger.warn('tfstate_to_output: mapped key not found insertkey "{}" refkey "{}"'.format(_insertkey,
-                                                                                                             _refkey))
+                self.logger.warn('mapped key not found insertkey "{}" refkey "{}"'.format(_insertkey,
+                                                                                          _refkey))
 
     def _tfstate_to_output(self):
         
@@ -501,7 +496,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         self.classname = 'TerraformWrapper'
 
         self.logger = Config0Logger(self.classname,
-                                       logcategory="cloudprovider")
+                                    logcategory="cloudprovider")
 
         self.logger.debug("Instantiating %s" % self.classname)
 
@@ -535,8 +530,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         set_must_exists = [ "tmp_bucket",
                             "log_bucket" ]
 
-        self.method = os.environ.get("METHOD")
-
         if self.method == "create":
             set_must_exists.extend( [ "ssm_name",
                                       "stateful_id",
@@ -544,19 +537,13 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         # ref 4353245325
         ResourceCmdHelper.__init__(self,
+                                   main_env_var_key="CONFIG0_RUNTIME_EXEC_HASH",
                                    app_name="terraform",
-                                   set_variables=["method",
-                                                  "shelloutconfig"],
                                    set_must_exists=set_must_exists,
                                    set_default_values={
                                        "failed_destroy": None,
-                                       "ssm_name": None,
-                                       "aws_region":"us-east-1",
-                                       "build_timeout":3600,
-                                       "build_image":"aws/codebuild/standard:4.0",
-                                       "compute_type":"BUILD_GENERAL1_SMALL",
-                                       "image_type":"LINUX_CONTAINER",
-                                       "buildspec_file":"buildspec.yml"})
+                                       "ssm_name": None
+                                   })
 
         self.terraform_tfvars = os.path.join(self.exec_dir,
                                              "terraform.tfvars")
@@ -626,7 +613,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.build_env_vars = {}
 
         try:
-            exclude_vars = list(self.tf_settings["tf_vars"].keys())
+            exclude_vars = list(self.tf_configs["tf_vars"].keys())
         except:
             exclude_vars = self.exclude_tfvars
 
@@ -789,8 +776,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
     # create terraform.tfvars file from TF_VAR_* variables
     def _create_terraform_tfvars(self):
 
-        if self.tf_settings and self.tf_settings.get("tf_vars"):
-            _tfvars = self.tf_settings["tf_vars"]
+        if self.tf_configs and self.tf_configs.get("tf_vars"):
+            _tfvars = self.tf_configs["tf_vars"]
         else:
             _tfvars = self.get_os_env_prefix_envs()
 
@@ -856,11 +843,11 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
     def _set_tfstate_parse(self):
 
-        if not self.tf_settings:
+        if not self.tf_configs:
             return
 
         # new version of resource setttings
-        resource_configs = self.tf_settings.get("resource_configs")
+        resource_configs = self.tf_configs.get("resource_configs")
 
         if resource_configs and resource_configs.get("include_raw"):
             self.tf_exec_include_raw = True
@@ -916,6 +903,17 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             resource["destroy"]["execgroup"] = self.destroy_execgroup
 
         return resource
+
+    def run(self):
+
+        if self.method == "create":
+            self.create()
+        elif self.method == "destroy":
+            self.destroy()
+        else:
+            usage()
+            print('method "{}" not supported!'.format(method))
+            exit(4)
 
     def create(self):
 
@@ -1094,10 +1092,8 @@ script + environmental variables
 
 basic:
     main environment variable
-        METHOD - create/destroy
         CONFIG0_RESOURCE_SETTINGS - The resource settings are retrieved from the environment variable 
                                      CONFIG0_RESOURCE_SETTINGS_HASH, which is base64 encoded
-                                 
     other environment variables
         TF_EXEC_TEMPLATE_VARS - environmental variables use for templating terraform files (not common)
         STATEFUL_ID - the stateful_id to reference the instance of the terraform creation/apply
@@ -1111,16 +1107,8 @@ if __name__ == '__main__':
 
     main = Main()
 
-    main.set_inputargs(set_env_vars=[ "CONFIG0_RESOURCE_SETTINGS_HASH" ])  # sets "config0_resource_settings_hash" in self.inputargs
-    method = main.inputargs.get("method")
+    # sets "config0_resource_settings_hash" in self.inputargs
+    main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_SETTINGS_HASH"])
+    main.run()
 
-    if method == "create":
-        main.create()
-    elif method == "destroy":
-        main.destroy()
-    else:
-        usage()
-        print('method "{}" not supported!'.format(method))
-        exit(4)
-
-    exit(0)
+    #exit(0)
