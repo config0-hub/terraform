@@ -484,7 +484,7 @@ class Config0ResourceTFVars(object):
         
 class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
-    def __init__(self,**kwargs):
+    def __init__(self):
 
         '''
 
