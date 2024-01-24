@@ -113,7 +113,7 @@ class Config0ResourceTFVars(object):
         This method sets the Terraform settings.
         """
         try:
-            self.tf_configs = self.resource_exec["tf_configs"]
+            self.tf_configs = self.runtime_exec["tf_configs"]
         except:
             self.tf_configs = {}
 
@@ -527,23 +527,29 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         # sets things like method, phases_params, etc
         Config0ResourceTFVars.__init__(self)
 
-        set_must_exists = [ "tmp_bucket",
-                            "log_bucket" ]
+        set_must_exists = [
+            "tmp_bucket",
+            "log_bucket"
+        ]
 
         if self.method == "create":
-            set_must_exists.extend( [ "ssm_name",
-                                      "stateful_id",
-                                      "remote_stateful_bucket" ] )
+            set_must_exists.extend( [
+                "ssm_name",
+                "stateful_id",
+                "remote_stateful_bucket"
+            ] )
 
         # ref 4353245325
-        ResourceCmdHelper.__init__(self,
-                                   main_env_var_key="CONFIG0_RUNTIME_EXEC_HASH",
-                                   app_name="terraform",
-                                   set_must_exists=set_must_exists,
-                                   set_default_values={
-                                       "failed_destroy": None,
-                                       "ssm_name": None
-                                   })
+        ResourceCmdHelper.__init__(
+            self,
+            main_env_var_key="CONFIG0_RUNTIME_EXEC_HASH",
+            app_name="terraform",
+            set_must_exists=set_must_exists,
+            set_default_values={
+               "failed_destroy": None,
+               "ssm_name": None
+            }
+        )
 
         self.terraform_tfvars = os.path.join(self.exec_dir,
                                              "terraform.tfvars")
