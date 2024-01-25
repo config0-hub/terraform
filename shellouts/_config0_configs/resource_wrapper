@@ -153,7 +153,13 @@ class Config0ResourceTFVars(object):
         This method initializes the Config0 resource settings.
         """
 
-        _settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
+        try:
+            _settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
+        except:
+            _settings = {}  # probably destroy
+
+        if not _settings:
+            return
 
         resource_exec_hash = _settings.get("resource_exec_hash")
         runtime_exec_hash  = _settings.get("runtime_exec_hash")
