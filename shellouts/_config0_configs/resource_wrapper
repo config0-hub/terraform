@@ -88,7 +88,7 @@ class Config0ResourceTFVars(object):
         self.tf_exec_map_keys = {}
 
         self.tf_exec_state_file = os.environ.get("TF_EXEC_STATE_FILE",
-                                                 "terraform.tfstate")
+                                                 "terraform-tfstate")
 
         self.add_resource_inputargs = {}
 
@@ -130,6 +130,7 @@ class Config0ResourceTFVars(object):
         """
 
         if not os.path.exists(self.tf_exec_state_file):
+            self.logger.debug(f'terraform state file to parse does not exists: {self.tf_exec_state_file}')
             return
 
         # read output file
@@ -464,6 +465,9 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         self.method = os.environ.get("METHOD",
                                      "create")
+
+        self.use_remote_state = os.environ.get("USE_REMOTE_STATE",
+                                               True)
 
         # set config0 resource settings
         # env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
@@ -848,7 +852,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         self._get_runtime_env_vars(method="create")
         self._set_build_method()
 
-        if self.use_remote_state:
+        if self.use_remote_state is True:
             self.create_remote_tf_bkend()  # use backend to track state file
         self.create_config0_settings_file()  # copy of settings file
         self._exec_tf(method="create")
