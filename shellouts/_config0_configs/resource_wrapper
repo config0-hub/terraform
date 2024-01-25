@@ -91,10 +91,6 @@ class Config0ResourceTFVars(object):
                                                  "terraform.tfstate")
 
         self.add_resource_inputargs = {}
-        self.resource_values = None
-        self.resource_labels = None
-        self.resource_type = None
-        self.provider = None
 
         self.std_labels_keys = [
             "region",
@@ -103,10 +99,8 @@ class Config0ResourceTFVars(object):
             "resource_type",
         ]
 
-        # set config0 resource settings
-        # env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
-        if not self._init_config0_resource_settings():
-            self.method = os.environ["METHOD"]
+        # set terraform settings
+        self._set_tf_configs()
 
     # only use for creation
     def _set_tf_configs(self):
@@ -129,75 +123,6 @@ class Config0ResourceTFVars(object):
             self.postscript_path = self.tf_configs["tf_exec_postscript_path"]
         elif self.tf_configs.get("tf_exec_postscript"):
             self.postscript = self.tf_configs["tf_exec_postscript"]
-
-    # only use for creation
-    def _set_runtime_settings(self):
-        """
-        This method sets the runtime settings.
-        """
-
-        self.runtime_env_vars = {}
-
-        if not self.runtime_exec:
-            return
-
-        env_vars = self.runtime_exec.get("env_vars")  # ref 4532643623642
-
-        if not env_vars:
-            return
-
-        for _k, _v in env_vars.items():
-            self.runtime_env_vars[_k.upper()] = _v
-
-    def _init_config0_resource_settings(self):
-        """
-        This method initializes the Config0 resource settings.
-        """
-
-        try:
-            _settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
-        except:
-            _settings = {}  # probably destroy
-
-        if not _settings:
-            return
-
-        resource_exec_hash = _settings.get("resource_exec_hash")
-        runtime_exec_hash  = _settings.get("runtime_exec_hash")
-        common_exec_hash  = _settings.get("common_exec_hash")
-
-        if resource_exec_hash:
-            os.environ["CONFIG0_RESOURCE_EXEC_HASH"] = resource_exec_hash
-            self.resource_exec = b64_decode(resource_exec_hash)
-
-        if runtime_exec_hash:
-            os.environ["CONFIG0_RUNTIME_EXEC_HASH"] = runtime_exec_hash
-            self.runtime_exec = b64_decode(runtime_exec_hash)
-
-        if common_exec_hash:
-            os.environ["CONFIG0_COMMON_EXEC_HASH"] = common_exec_hash
-            #common_exec = b64_decode(common_exec_hash)
-
-        self.method = self.resource_exec.get("method")
-        self.provider = self.resource_exec.get("provider")
-        self.resource_type = self.resource_exec.get("type")
-        self.resource_values = self.resource_exec.get("values")
-        self.resource_labels = self.resource_exec.get("labels")
-
-        if not self.resource_type:
-            raise Exception("resource_type needs to be set")
-
-        if not self.provider:
-            self.logger.error("provider should be set")
-
-        # sets things like stateful_id and ssm_name
-        # as environment variables
-        self._set_runtime_settings()
-
-        # set terraform settings
-        self._set_tf_configs()
-
-        return True
 
     def _get_tfstate_file(self):
         """
@@ -532,6 +457,18 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                            "True",
                            True ]
 
+        self.resource_values = None
+        self.resource_labels = None
+        self.resource_type = None
+        self.provider = None
+
+        self.method = os.environ.get("METHOD",
+                                     "create")
+
+        # set config0 resource settings
+        # env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
+        self._init_config0_resource_settings()
+
         # parses env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
         # sets things like method, phases_params, etc
         Config0ResourceTFVars.__init__(self)
@@ -569,6 +506,71 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         # ResourceCmdHelper
         self.set_cur_phase()
 
+    # only use for creation
+    def _set_runtime_settings(self):
+        """
+        This method sets the runtime settings.
+        """
+
+        self.runtime_env_vars = {}
+
+        try:
+            env_vars = self.runtime_exec.get("env_vars")  # ref 4532643623642
+        except:
+            env_vars = None
+
+        if not env_vars:
+            return
+
+        for _k, _v in env_vars.items():
+            self.runtime_env_vars[_k.upper()] = _v
+
+    def _init_config0_resource_settings(self):
+        """
+        This method initializes the Config0 resource settings.
+        """
+
+        try:
+            _settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
+        except:
+            _settings = {}  # probably destroy
+
+        if not _settings:
+            return
+
+        resource_exec_hash = _settings.get("resource_exec_hash")
+        runtime_exec_hash  = _settings.get("runtime_exec_hash")
+        common_exec_hash  = _settings.get("common_exec_hash")
+
+        if resource_exec_hash:
+            os.environ["CONFIG0_RESOURCE_EXEC_HASH"] = resource_exec_hash
+            self.resource_exec = b64_decode(resource_exec_hash)
+
+        if runtime_exec_hash:
+            os.environ["CONFIG0_RUNTIME_EXEC_HASH"] = runtime_exec_hash
+            self.runtime_exec = b64_decode(runtime_exec_hash)
+
+        if common_exec_hash:
+            os.environ["CONFIG0_COMMON_EXEC_HASH"] = common_exec_hash
+            #common_exec = b64_decode(common_exec_hash)
+
+        self.provider = self.resource_exec.get("provider")
+        self.resource_type = self.resource_exec.get("type")
+        self.resource_values = self.resource_exec.get("values")
+        self.resource_labels = self.resource_exec.get("labels")
+
+        if not self.resource_type:
+            raise Exception("resource_type needs to be set")
+
+        if not self.provider:
+            self.logger.error("provider should be set")
+
+        # sets things like stateful_id and ssm_name
+        # as environment variables
+        self._set_runtime_settings()
+
+        return True
+
     def _set_build_method(self):
 
         if os.environ.get("USE_CODEBUILD"):  # longer than 900 seconds
@@ -600,17 +602,18 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         resource["destroy"] = {"shelloutconfig":self.shelloutconfig}
 
         # environmental variables to include during destruction
-        env_vars = {"METHOD":"destroy"}
+        env_vars = {
+            "DOCKER_EXEC_ENV": self.docker_image,
+            "DOCKER_RUNTIME": self.docker_image,
+            "REMOTE_STATEFUL_BUCKET":self.remote_stateful_bucket,
+            "STATEFUL_ID": self.stateful_id,
+            "BUILD_TIMEOUT": self.build_timeout,
+            "APP_DIR":self.app_dir
+        }
 
         if self.destroy_env_vars: 
             env_vars = dict(env_vars,
                             **self.destroy_env_vars)
-
-        if self.stateful_id: 
-            env_vars["STATEFUL_ID"] = self.stateful_id
-
-        env_vars["DOCKER_EXEC_ENV"] = self.docker_image
-        env_vars["DOCKER_RUNTIME"] = self.docker_image
 
         resource["destroy"]["env_vars"] = json.dumps(env_vars)
 
@@ -632,14 +635,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         except:
             exclude_vars = self.exclude_tfvars
 
-        self.build_env_vars["METHOD"] = method
-
         self.insert_os_env_prefix_envs(self.build_env_vars,
                                        exclude_vars)
-
-        if self.runtime_env_vars:
-            for _k,_v in self.runtime_env_vars.items():
-                self.build_env_vars[_k] = _v
 
         self.build_env_vars["STATEFUL_ID"] = self.stateful_id # this should be set by ResourceCmdHelper
         self.build_env_vars["APP_DIR"] = self.app_dir  # this should be set by ResourceCmdHelper 
@@ -652,7 +649,10 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout # this should be set by ResourceCmdHelper and used for duratiion of temp iam credentials
         self.build_env_vars["TMPDIR"] = "/tmp"
         self.build_env_vars["DOCKER_IMAGE"] = self.docker_image
-        self.build_env_vars["METHOD"] = method
+
+        if self.runtime_env_vars:
+            for _k,_v in self.runtime_env_vars.items():
+                self.build_env_vars[_k] = _v
 
         # ssm name setting
         if self.build_env_vars.get("SSM_NAME"):     # usually set in create
@@ -847,6 +847,10 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         self._get_runtime_env_vars(method="create")
         self._set_build_method()
+
+        if self.use_remote_state:
+            self.create_remote_tf_bkend()  # use backend to track state file
+        self.create_config0_settings_file()  # copy of settings file
         self._exec_tf(method="create")
 
         # we clean if local build
@@ -867,57 +871,14 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         if resource_configs and resource_configs.get("include_raw"):
             self.tf_exec_include_raw = True
 
-        if resource_configs and resource_configs.get("add_keys"):
-            self.tf_exec_add_keys = resource_configs["add_keys"]
-        elif resource_configs and resource_configs.get("include_keys"):
+        if resource_configs and resource_configs.get("include_keys"):
             self.tf_exec_add_keys = resource_configs["include_keys"]
 
-        if resource_configs and resource_configs.get("remove_keys"):
-            self.tf_exec_remove_keys.extend(resource_configs["remove_keys"])
-        elif resource_configs and resource_configs.get("exclude_keys"):
+        if resource_configs and resource_configs.get("exclude_keys"):
             self.tf_exec_remove_keys.extend(resource_configs["exclude_keys"])
 
         if resource_configs and resource_configs.get("map_keys"):
             self.tf_exec_map_keys = resource_configs["map_keys"]
-
-    def add_destroy_params(self,resource):
-
-        '''
-        we typically load the destroy parameters along with created resource like a 
-        VPC or database 
-
-        the resource is therefore self contained, whereby it specifies to the 
-        system how it can be destroyed.
-
-        for terraform, we include things like the docker image used to 
-        destroy the resource and any environmental variables 
-        '''
-
-        # Create destroy resource arguments and reference
-        resource["destroy"] = {"shelloutconfig":self.shelloutconfig}
-
-        # environmental variables to include during destruction
-        env_vars = {"METHOD":"destroy"}
-
-        if self.destroy_env_vars: 
-            env_vars = dict(env_vars,
-                            **self.destroy_env_vars)
-
-        if self.stateful_id: 
-            env_vars["STATEFUL_ID"] = self.stateful_id
-
-        env_vars["DOCKER_EXEC_ENV"] = self.docker_image
-        env_vars["DOCKER_RUNTIME"] = self.docker_image
-
-        resource["destroy"]["env_vars"] = json.dumps(env_vars)
-
-        if env_vars.get("STATEFUL_ID"): 
-            resource["destroy"]["stateful_id"] = env_vars["STATEFUL_ID"]
-
-        if self.destroy_execgroup: 
-            resource["destroy"]["execgroup"] = self.destroy_execgroup
-
-        return resource
 
     def run(self):
 
@@ -927,7 +888,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.destroy()
         else:
             usage()
-            print('method "{}" not supported!'.format(method))
+            print('method "{}" not supported!'.format(self.method))
             exit(4)
 
     def create(self):
@@ -960,7 +921,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         # revisit 4352525
         if not self.templify(app_template_vars="TF_EXEC_TEMPLATE_VARS",
                              **self.inputargs):
-
             self.exclude_tfvars = self._create_terraform_tfvars()
 
         if not os.path.exists(self.exec_dir):
@@ -1039,8 +999,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
             self.logger.error("Cannot find environmental file {}".format(docker_env_file))
 
-            if method:
-                cmd = 'docker run -e METHOD="{}" --rm -v {}:{} {}'.format(method,
+            if self.method:
+                cmd = 'docker run -e METHOD="{}" --rm -v {}:{} {}'.format(self.method,
                                                                           run_share_dir,
                                                                           share_dir,
                                                                           self.docker_image)
@@ -1049,8 +1009,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                                                            share_dir,
                                                            self.docker_image)
         else:
-            if method:
-                cmd = 'docker run -e METHOD="{}" --env-file {} --rm -v {}:{} {}'.format(method,
+            if self.method:
+                cmd = 'docker run -e METHOD="{}" --env-file {} --rm -v {}:{} {}'.format(self.method,
                                                                                         docker_env_file,
                                                                                         run_share_dir,
                                                                                         share_dir,
@@ -1063,7 +1023,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return cmd
 
-    def _exec_docker_local(self,method=None,retries=None):
+    def _exec_docker_local(self,retries=None):
 
         os.chdir(self.run_share_dir)
 
@@ -1071,7 +1031,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         self.logger.debug(cmd)
 
-        if method == "destroy" and retries:
+        if self.method == "destroy" and retries:
             retries = 6
 
         if not retries:
@@ -1108,14 +1068,11 @@ script + environmental variables
 basic:
     main environment variable
         CONFIG0_RESOURCE_SETTINGS - The resource settings are retrieved from the environment variable 
-                                     CONFIG0_RESOURCE_SETTINGS_HASH, which is base64 encoded
+                                     CONFIG0_RESOURCE_SETTINGS_HASH, which is base64 encoded - this is sanitised
+        METHOD - This needs to be set
+        
     other environment variables
         TF_EXEC_TEMPLATE_VARS - environmental variables use for templating terraform files (not common)
-        STATEFUL_ID - the stateful_id to reference the instance of the terraform creation/apply
-        DOCKER_RUNTIME/DOCKER_EXEC_ENV (default elasticdev/terraform-run-env) - the docker container/image to run execution if running locally
-        DOCKER_ENV_FILE (default .env) - name of the docker env file to create
-        SHARE_DIR (default is /var/tmp/share) - the shared directory that is shared with the worker during docker container execution
-
        """)
 
 if __name__ == '__main__':
