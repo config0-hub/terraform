@@ -105,7 +105,8 @@ class Config0ResourceTFVars(object):
 
         # set config0 resource settings
         # env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
-        self._init_config0_resource_settings()
+        if not self._init_config0_resource_settings():
+            self.method = os.environ["METHOD"]
 
     # only use for creation
     def _set_tf_configs(self):
@@ -195,6 +196,8 @@ class Config0ResourceTFVars(object):
 
         # set terraform settings
         self._set_tf_configs()
+
+        return True
 
     def _get_tfstate_file(self):
         """
