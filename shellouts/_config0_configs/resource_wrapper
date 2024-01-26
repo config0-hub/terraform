@@ -915,6 +915,9 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         if self._eval_post_tf("create"):
             return self._post_create()
 
+        # testtest456
+        self.logger.debug("b"*32)
+
         return
 
     def _init_create(self):
@@ -1085,6 +1088,15 @@ if __name__ == '__main__':
 
     # sets "config0_resource_settings_hash" in self.inputargs
     main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_SETTINGS_HASH"])
+    # testtest456
+    main.logger.debug("a" * 32)
+    main.logger.debug("a" * 32)
+    main.logger.debug("a" * 32)
     main.run()
-
-    #exit(0)
+    main.logger.debug("c" * 32)
+    main.logger.debug("c" * 32)
+    main.logger.debug("c" * 32)
+    main.test_exit()
+    main.logger.debug("d" * 32)
+    main.logger.debug("d" * 32)
+    main.logger.debug("d" * 32)
