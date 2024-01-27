@@ -592,13 +592,13 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
     def add_destroy_params(self,resource):
 
         '''
-        we typically load the destroy parameters along with created resource like a 
+        - we typically load the destroy parameters along with created resource like a
         VPC or database 
 
-        the resource is therefore self contained, whereby it specifies to the 
+        - the resource is therefore self contained, whereby it specifies to the
         system how it can be destroyed.
 
-        for terraform, we include things like the docker image used to 
+        - for terraform, we include things like the docker image used to
         destroy the resource and any environmental variables 
         '''
 
