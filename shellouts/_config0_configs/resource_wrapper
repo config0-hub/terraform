@@ -635,29 +635,31 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         if not self.build_env_vars:
             self.build_env_vars = {}
 
-        try:
-            exclude_vars = list(self.tf_configs["tf_vars"].keys())
-        except:
-            exclude_vars = self.exclude_tfvars
+        if method == "create":
+            try:
+                exclude_vars = list(self.tf_configs["tf_vars"].keys())
+            except:
+                exclude_vars = self.exclude_tfvars
 
-        self.insert_os_env_prefix_envs(self.build_env_vars,
-                                       exclude_vars)
+            self.insert_os_env_prefix_envs(self.build_env_vars,
+                                           exclude_vars)
+
+            self.build_env_vars["SHARE_DIR"] = self.share_dir # this should be set by ResourceCmdHelper
+            self.build_env_vars["RUN_SHARE_DIR"] = self.run_share_dir # this should be set by ResourceCmdHelper
+            self.build_env_vars["LOG_BUCKET"] = self.log_bucket # this should be set by ResourceCmdHelper
+            self.build_env_vars["TMP_BUCKET"] = self.tmp_bucket # this should be set by ResourceCmdHelper
+            self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout # this should be set by ResourceCmdHelper and used for duratiion of temp iam credentials
+            self.build_env_vars["DOCKER_IMAGE"] = self.docker_image
+
+            if self.runtime_env_vars:
+                for _k,_v in self.runtime_env_vars.items():
+                    self.build_env_vars[_k] = _v
 
         self.build_env_vars["STATEFUL_ID"] = self.stateful_id # this should be set by ResourceCmdHelper
-        self.build_env_vars["APP_DIR"] = self.app_dir  # this should be set by ResourceCmdHelper 
-        self.build_env_vars["APP_NAME"] = self.app_name  # this should be set by ResourceCmdHelper 
-        self.build_env_vars["SHARE_DIR"] = self.share_dir # this should be set by ResourceCmdHelper
-        self.build_env_vars["RUN_SHARE_DIR"] = self.run_share_dir # this should be set by ResourceCmdHelper
-        self.build_env_vars["LOG_BUCKET"] = self.log_bucket # this should be set by ResourceCmdHelper
+        self.build_env_vars["APP_DIR"] = self.app_dir  # this should be set by ResourceCmdHelper
+        self.build_env_vars["APP_NAME"] = self.app_name  # this should be set by ResourceCmdHelper
         self.build_env_vars["REMOTE_STATEFUL_BUCKET"] = self.remote_stateful_bucket # this should be set by ResourceCmdHelper
-        self.build_env_vars["TMP_BUCKET"] = self.tmp_bucket # this should be set by ResourceCmdHelper
-        self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout # this should be set by ResourceCmdHelper and used for duratiion of temp iam credentials
         self.build_env_vars["TMPDIR"] = "/tmp"
-        self.build_env_vars["DOCKER_IMAGE"] = self.docker_image
-
-        if self.runtime_env_vars:
-            for _k,_v in self.runtime_env_vars.items():
-                self.build_env_vars[_k] = _v
 
         # ssm name setting
         if self.build_env_vars.get("SSM_NAME"):     # usually set in create
@@ -666,7 +668,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.ssm_name = os.environ["SSM_NAME"]
 
         if self.ssm_name:
-            self.build_env_vars["SSM_NAME"] = self.ssm_name 
+            self.build_env_vars["SSM_NAME"] = self.ssm_name
 
         return 
 
@@ -855,6 +857,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         if self.use_remote_state is True:
             self.create_remote_tf_bkend()  # use backend to track state file
+
         self.create_config0_settings_file()  # copy of settings file
         self._exec_tf(method="create")
 
@@ -891,6 +894,8 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.create()
         elif self.method == "destroy":
             self.destroy()
+        elif self.method == "validate":
+            self.validate()
         else:
             usage()
             print('method "{}" not supported!'.format(self.method))
