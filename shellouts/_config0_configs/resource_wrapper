@@ -589,21 +589,21 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         else:
             self.build_method = "local"
 
-    def add_destroy_params(self,resource):
+    def add_mod_params(self,resource):
 
         '''
-        - we typically load the destroy parameters along with created resource like a
-        VPC or database 
+        - we typically load the modifications parameters along with created resource like a
+        VPC or database
 
         - the resource is therefore self contained, whereby it specifies to the
-        system how it can be destroyed.
+        system how it can be validated/destroyed.
 
         - for terraform, we include things like the docker image used to
-        destroy the resource and any environmental variables 
+        validate/destroy the resource and any environmental variables
         '''
 
-        # Create destroy resource arguments and reference
-        resource["destroy"] = {"shelloutconfig":self.shelloutconfig}
+        # Create mod params resource arguments and reference
+        resource["mod_params"] = {"shelloutconfig":self.shelloutconfig}
 
         # environmental variables to include during destruction
         env_vars = {
@@ -612,21 +612,36 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             "REMOTE_STATEFUL_BUCKET":self.remote_stateful_bucket,
             "STATEFUL_ID": self.stateful_id,
             "BUILD_TIMEOUT": self.build_timeout,
-            "APP_DIR":self.app_dir,
-            "METHOD": "destroy"
+            "APP_DIR":self.app_dir
         }
 
-        if self.destroy_env_vars: 
-            env_vars = dict(env_vars,
-                            **self.destroy_env_vars)
+        resource["mod_params"]["env_vars"] = json.dumps(env_vars)
 
-        resource["destroy"]["env_vars"] = json.dumps(env_vars)
+        if env_vars.get("STATEFUL_ID"):
+            resource["mod_params"]["stateful_id"] = env_vars["STATEFUL_ID"]
 
-        if env_vars.get("STATEFUL_ID"): 
-            resource["destroy"]["stateful_id"] = env_vars["STATEFUL_ID"]
+        if self.mod_execgroup:
+            resource["mod_params"]["execgroup"] = self.mod_execgroup
 
-        if self.destroy_execgroup: 
-            resource["destroy"]["execgroup"] = self.destroy_execgroup
+        if self.destroy_env_vars:
+            resource["destroy"] = {
+                "env_vars": dict({"METHOD": "destroy"},
+                                 **self.destroy_env_vars)
+            }
+        else:
+            resource["destroy"] = {
+                "env_vars": {"METHOD": "destroy"}
+            }
+
+        if self.validate_env_vars:
+            resource["validate"] = {
+                "env_vars":dict({"METHOD":"validate"},
+                **self.validate_env_vars)
+            }
+        else:
+            resource["validate"] = {
+                "env_vars":{"METHOD":"validate"}
+            }
 
         return resource
 
@@ -644,10 +659,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.insert_os_env_prefix_envs(self.build_env_vars,
                                            exclude_vars)
 
-            self.build_env_vars["SHARE_DIR"] = self.share_dir # this should be set by ResourceCmdHelper
-            self.build_env_vars["RUN_SHARE_DIR"] = self.run_share_dir # this should be set by ResourceCmdHelper
-            self.build_env_vars["LOG_BUCKET"] = self.log_bucket # this should be set by ResourceCmdHelper
-            self.build_env_vars["TMP_BUCKET"] = self.tmp_bucket # this should be set by ResourceCmdHelper
             self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout # this should be set by ResourceCmdHelper and used for duratiion of temp iam credentials
             self.build_env_vars["DOCKER_IMAGE"] = self.docker_image
 
@@ -655,6 +666,10 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                 for _k,_v in self.runtime_env_vars.items():
                     self.build_env_vars[_k] = _v
 
+        self.build_env_vars["SHARE_DIR"] = self.share_dir  # this should be set by ResourceCmdHelper
+        self.build_env_vars["RUN_SHARE_DIR"] = self.run_share_dir  # this should be set by ResourceCmdHelper
+        self.build_env_vars["LOG_BUCKET"] = self.log_bucket  # this should be set by ResourceCmdHelper
+        self.build_env_vars["TMP_BUCKET"] = self.tmp_bucket  # this should be set by ResourceCmdHelper
         self.build_env_vars["STATEFUL_ID"] = self.stateful_id # this should be set by ResourceCmdHelper
         self.build_env_vars["APP_DIR"] = self.app_dir  # this should be set by ResourceCmdHelper
         self.build_env_vars["APP_NAME"] = self.app_name  # this should be set by ResourceCmdHelper
