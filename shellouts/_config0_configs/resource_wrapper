@@ -582,7 +582,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         elif os.environ.get("USE_LAMBDA"):  # shorter than 900 seconds
             self.build_method = "lambda"
         elif os.environ.get("USE_AWS",True):  # select codebuild or lambda
-            if self.build_timeout > 900:
+            if self.build_timeout > 600:
                 self.build_method = "codebuild"
             else:
                 self.build_method = "lambda"
