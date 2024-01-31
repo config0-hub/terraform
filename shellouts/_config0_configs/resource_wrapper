@@ -124,28 +124,6 @@ class Config0ResourceTFVars(object):
         elif self.tf_configs.get("tf_exec_postscript"):
             self.postscript = self.tf_configs["tf_exec_postscript"]
 
-    def _get_tfstate_file(self):
-        """
-        This method gets the Terraform state file.
-        """
-
-        if not os.path.exists(self.tf_exec_state_file):
-            self.logger.debug(f'terraform state file to parse does not exists: {self.tf_exec_state_file}')
-            return
-
-        # read output file
-        with open(self.tf_exec_state_file) as json_file:
-            data = json.load(json_file)
-
-        if not data:
-            msg = "tfstate_to_output: there is no data from {}".format(os.path.join(os.getcwd(),
-                                                                                    self.tf_exec_state_file))
-            self.logger.debug(msg)
-
-            return
-
-        return data
-
     def _insert_resource_values(self, values):
         """
         This method inserts the resource values into the output values.
@@ -416,6 +394,44 @@ class Config0ResourceTFVars(object):
             self.logger.warn("_insert_tf remove keys failed")
 
         return values
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         
 class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
