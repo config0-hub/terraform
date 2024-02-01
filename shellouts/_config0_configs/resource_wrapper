@@ -482,9 +482,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         self.method = os.environ.get("METHOD",
                                      "create")
 
-        self.use_remote_state = os.environ.get("USE_REMOTE_STATE",
-                                               True)
-
         # set config0 resource settings
         # env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
         self._init_config0_resource_settings()
@@ -513,6 +510,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             set_must_exists=set_must_exists,
             set_default_values={
                "failed_destroy": None,
+               "use_remote_state": None,
                "ssm_name": None
             }
         )
@@ -816,7 +814,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         self._get_runtime_env_vars(method="create")
         self._set_build_method()
 
-        if self.use_remote_state is True:
+        if self.use_remote_state:
             self.create_remote_tf_bkend()  # use backend to track state file
 
         self.create_config0_settings_file()  # copy of settings file
@@ -907,7 +905,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         if self.postscript_path:
             self.logger.debug("u4324: getting resource from custom postscript path")
-            resource = self.get_resources_details()
+            resource = self.get_resource_details()
 
             try:
                 resource = self.to_json(resource)
@@ -922,7 +920,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             if self.add_resource_inputargs:
                 resource["resource_inputargs"] = self.add_resource_inputargs
 
-            resource = self.configure_resources_details(resource)
+            resource = self.config_resource_details(resource)
 
         if not resource: 
             self.logger.warn("u4324: resource info is not found in the output")
