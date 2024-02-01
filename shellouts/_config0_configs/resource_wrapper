@@ -591,20 +591,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return True
 
-    def _set_build_method(self):
-
-        if os.environ.get("USE_CODEBUILD"):  # longer than 900 seconds
-            self.build_method = "codebuild"
-        elif os.environ.get("USE_LAMBDA"):  # shorter than 900 seconds
-            self.build_method = "lambda"
-        elif os.environ.get("USE_AWS",True):  # select codebuild or lambda
-            if self.build_timeout > 600:
-                self.build_method = "codebuild"
-            else:
-                self.build_method = "lambda"
-        else:
-            self.build_method = "local"
-
     def _get_runtime_env_vars(self,method="create"):
 
         if not self.build_env_vars:
@@ -619,7 +605,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             self.insert_os_env_prefix_envs(self.build_env_vars,
                                            exclude_vars)
 
-            self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout # this should be set by ResourceCmdHelper and used for duratiion of temp iam credentials
+            self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout  # this should be set by ResourceCmdHelper and used for duratiion of temp iam credentials
             self.build_env_vars["DOCKER_IMAGE"] = self.docker_image
 
             if self.runtime_env_vars:
