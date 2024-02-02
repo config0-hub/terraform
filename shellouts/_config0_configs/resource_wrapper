@@ -610,6 +610,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
                 for _k,_v in self.runtime_env_vars.items():
                     self.build_env_vars[_k] = _v
 
+        self._insert_tf_version()
         self.build_env_vars["SHARE_DIR"] = self.share_dir  # this should be set by ResourceCmdHelper
         self.build_env_vars["RUN_SHARE_DIR"] = self.run_share_dir  # this should be set by ResourceCmdHelper
         self.build_env_vars["LOG_BUCKET"] = self.log_bucket  # this should be set by ResourceCmdHelper
@@ -629,7 +630,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
         if self.ssm_name:
             self.build_env_vars["SSM_NAME"] = self.ssm_name
 
-        return 
+        return
 
     def _aggregate_output(self,results,output=None):
 
