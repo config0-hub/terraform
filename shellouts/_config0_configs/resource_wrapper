@@ -883,28 +883,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             print('method "{}" not supported!'.format(self.method))
             exit(4)
 
-    def create(self):
-
-        self.init_phase_run()
-
-        if self.phase == "submit":
-            self._init_create()
-            self._exec_tf_apply()
-        elif self.phase == "retrieve":
-            self._exec_tf_apply()
-        else:
-            self._init_create()
-            self._exec_tf_apply()
-
-        if self.tf_results and self.tf_results.get("output"):
-            self.append_log(self.tf_results["output"])
-            del self.tf_results["output"]
-
-        if self._eval_post_tf("create"):
-            return self._post_create()
-
-        return
-
     def _init_create(self):
 
         if not self.stateful_id:
