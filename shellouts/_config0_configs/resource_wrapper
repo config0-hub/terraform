@@ -243,6 +243,11 @@ class Config0ResourceTFVars(object):
                   "provider": self.provider,
                   "main": True}
 
+        if self.provider == "aws":
+            self.tf_exec_map_keys.update({"region": "aws_default_region"})
+        elif self.provider == "do":
+            self.tf_exec_map_keys.update({"region": "do_region"})
+
         self._insert_resource_values(values)
 
         # special case of ssm_name/secrets
