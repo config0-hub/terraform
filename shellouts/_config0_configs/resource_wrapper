@@ -13,7 +13,8 @@ from config0_publisher.serialization import b64_decode
 from config0_publisher.serialization import b64_encode
 from config0_publisher.utilities import print_json
 from config0_publisher.resource.codebuild import Codebuild
-from config0_publisher.resource.lambdabuild import Lambdabuild
+from config0_publisher.resource.lambdabuild import DockerLocalBuild
+from config0_publisher.resource.dockerbuild import Lambdabuild
 
 #from config0_publisher.resource.manage import to_jsonfile
 #from config0_publisher.cloud.aws.codebuild import CodebuildResourceHelper
@@ -477,24 +478,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return
 
-    def _aggregate_output(self,results,output=None):
-
-        if not output:
-            output = ""
-
-        if not results:
-            return output
-
-        try:
-            _output = results.get("output")
-        except:
-            _output = None
-
-        if not _output:
-            return output
-
-        return output + results.get("output")
-
     def _tf_map_list_fix_value(self,_value):
 
         # check object type
@@ -759,10 +742,6 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return True
 
-    #######################################################################
-    # testtest456 - move to resource_wrapper after testing
-    # insert 45245
-    #######################################################################
 
     def _insert_tf_map_keys(self,values):
 
@@ -1080,23 +1059,37 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return _awsbuild.run()
 
+    def _exec_docker_local(self,method="create"):
+
+        _local_build = DockerLocalBuild(
+            build_env_vars=self.build_env_vars,
+            docker_env_file=self.docker_env_file,
+            share_dir=self.share_dir,
+            run_share_dir=self.run_share_dir,
+            method=method,
+            docker_image=self.docker_image)
+
+        return _local_build.run()
+
     def _exec_lambdabuild(self,method="create"):
 
         cinputargs = self._get_aws_exec_cinputargs(method=method)
         _awsbuild = Lambdabuild(**cinputargs)
 
-        #if self.phase == "retrieve":
-        #    return _awsbuild.retrieve(**self.get_phase_inputargs())
-
         # submit and run required env file
         if method == "create":
             self.create_build_envfile(openssl=False)
 
-        #if self.phase == "submit":
-        #    return _awsbuild.submit(**self.get_phase_inputargs())
         results = _awsbuild.run()
 
         return results
+
+        # below is for phases - requires more testing
+        #if self.phase == "retrieve":
+        #    return _awsbuild.retrieve(**self.get_phase_inputargs())
+
+        #if self.phase == "submit":
+        #    return _awsbuild.submit(**self.get_phase_inputargs())
 
     def create_remote_tf_bkend(self):
 
@@ -1127,7 +1120,6 @@ terraform {{
         elif self.build_method == "lambda":
             self.tf_results = self._exec_lambdabuild(method=method)
         else:  # execute locally
-            self._create_docker_env_file()
             self.tf_results = self._exec_docker_local(method=method)
 
         return self.tf_results
@@ -1189,101 +1181,6 @@ terraform {{
             self.printed = True
 
         return True
-
-    #####################################
-    # move to separate DockerLocalBuild
-    #####################################
-
-    def _create_docker_env_file(self):
-
-        # note: self.docker_env_file is set by
-        # "_get_docker_env_filepath" in ResourceCmdHelper
-        if not self.build_env_vars.items():
-            return
-
-        file_obj = open(self.docker_env_file,"w")
-
-        for _k,_v in self.build_env_vars.items():
-            file_obj.write("\n")
-            file_obj.write("{}={}".format(_k,_v))
-
-        file_obj.close()
-
-    def _get_docker_run_cmd(self,**kwargs):
-
-        share_dir = kwargs.get("share_dir",
-                               self.share_dir)
-
-        run_share_dir = kwargs.get("run_share_dir",
-                                   self.run_share_dir)
-
-        docker_env_file = kwargs.get("docker_env_file",
-                                     self.docker_env_file)
-
-        if not os.path.exists(docker_env_file):
-
-            self.logger.error("Cannot find environmental file {}".format(docker_env_file))
-
-            if self.method:
-                cmd = 'docker run -e METHOD="{}" --rm -v {}:{} {}'.format(self.method,
-                                                                          run_share_dir,
-                                                                          share_dir,
-                                                                          self.docker_image)
-            else:
-                cmd = 'docker run --rm -v {}:{} {}'.format(run_share_dir,
-                                                           share_dir,
-                                                           self.docker_image)
-        else:
-            if self.method:
-                cmd = 'docker run -e METHOD="{}" --env-file {} --rm -v {}:{} {}'.format(self.method,
-                                                                                        docker_env_file,
-                                                                                        run_share_dir,
-                                                                                        share_dir,
-                                                                                        self.docker_image)
-            else:
-                cmd = 'docker run --env-file {} --rm -v {}:{} {}'.format(docker_env_file,
-                                                                         run_share_dir,
-                                                                         share_dir,
-                                                                         self.docker_image)
-
-        return cmd
-
-    def _exec_docker_local(self,retries=None):
-
-        os.chdir(self.run_share_dir)
-
-        cmd = self._get_docker_run_cmd()
-
-        self.logger.debug(cmd)
-
-        if self.method == "destroy" and retries:
-            retries = 6
-
-        if not retries:
-            retries = 1
-
-        output = None
-
-        for retry in range(retries):
-
-            results = self.execute(cmd,
-                                   output_to_json=False,
-                                   exit_error=False)
-
-            output = self._aggregate_output(results,
-                                            output=output)
-
-            if not results or results.get("status") is False:
-                continue
-
-            break
-
-        results["output"] = output
-
-        return results
-
-
-    #####################################
 
 def usage():
 
