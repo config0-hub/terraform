@@ -211,22 +211,6 @@ class Config0ResourceTFVars(object):
 
         return 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     def _tfstate_to_output(self):
 
         self.data = self._get_tfstate_file()
@@ -290,6 +274,7 @@ class Config0ResourceTFVars(object):
             self.logger.warn("_insert_tf remove keys failed")
 
         return values
+
 
 class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
@@ -775,6 +760,7 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
     #####################################
     # move to separate DockerLocalBuild
     #####################################
+
     def _create_docker_env_file(self):
 
         # note: self.docker_env_file is set by
@@ -863,6 +849,11 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
 
         return results
 
+    #######################################################################
+    # testtest456 - move to resource_wrapper after testing
+    # insert 45245
+    #######################################################################
+
     def _insert_tf_map_keys(self,values):
 
         self.logger.debug("#" * 32)
@@ -929,27 +920,31 @@ class Main(ResourceCmdHelper,Config0ResourceTFVars):
             elif not values.get(_refkey):
                 self.logger.warn(f'mapped key: refkey not found "{_refkey} for insertkey "{_insertkey}"')
 
-    def create_remote_tf_bkend(self):
+    def create(self):
 
-        _file = os.path.join(
-            self.run_share_dir,
-            self.app_dir,
-            "backend.tf"
-        )
+        self.init_phase_run()
 
-        contents = f"""\
-terraform {{
-  backend "s3" {{
-    bucket = "{self.remote_stateful_bucket}"
-    key    = "{self.stateful_id}.tfstate"
-    region = "{self.aws_region}"
-  }}
-}}
+        if self.phase == "submit":
+            self._init_create()
+            self._exec_tf_apply()
+        elif self.phase == "retrieve":
+            self._exec_tf_apply()
+        else:
+            self._init_create()
+            self._exec_tf_apply()
 
-"""
+        self._eval_phases_tf("create")
+        self._eval_failure(method="create")
+        self._post_create()
 
-        with open(_file,"w") as file:
-            file.write(contents)
+        # this may cause duplication output in log file
+        # testtest456 - if codebuild doesn't show up in UI, then revert
+        #if not self.printed and self.final_output:
+        if not self.printed and self.final_output and not self.build_method == "codebuild":
+            print(self.final_output)
+            self.printed = True
+
+        return True
 
     def _insert_tf_version(self,env_vars):
 
@@ -1102,72 +1097,6 @@ terraform {{
 
         return data
 
-    def _exec_tf(self,method):
-
-        if self.build_method == "codebuild":
-            self.tf_results = self._exec_codebuild(method=method)
-        elif self.build_method == "lambda":
-            self.tf_results = self._exec_lambdabuild(method=method)
-        else:  # execute locally
-            self._create_docker_env_file()
-            self.tf_results = self._exec_docker_local(method=method)
-
-        return self.tf_results
-
-    def _exec_tf_validate(self):
-
-        self._get_runtime_env_vars(method="validate")
-        self._set_build_method()
-        self._exec_tf(method="validate")
-
-        return self.tf_results
-
-    def _exec_tf_destroy(self):
-
-        self._get_runtime_env_vars(method="destroy")
-        self._set_build_method()
-        self._exec_tf(method="destroy")
-
-        return self.tf_results
-
-    def validate(self):
-
-        self._exec_tf_validate()
-        self._eval_failure(method="validate")
-
-        if not self.printed and self.final_output:
-            print(self.final_output)
-            self.printed = True
-
-        return True
-
-    def destroy(self):
-
-        self.init_phase_run()
-
-        if self.phase == "submit":
-            self._exec_tf_destroy()
-        elif self.phase == "retrieve":
-            self._exec_tf_destroy()
-        else:
-            self._exec_tf_destroy()
-
-        self._eval_phases_tf("destroy") # see if phases
-
-        try:
-            os.chdir(self.cwd)
-        except:
-            os.chdir("/tmp")
-
-        self._eval_failure(method="destroy")
-
-        # below probably cause duplication in UI, but it does on cli.
-        if not self.printed and self.final_output:
-            print(self.final_output)
-            self.printed = True
-
-        return True
-
     def add_mod_params(self,resource):
 
         '''
@@ -1229,41 +1158,6 @@ terraform {{
 
         return resource
 
-    def _eval_failure(self,method=None):
-
-        output = None
-
-        if not hasattr(self,"tf_results"):
-            return
-
-        if not self.tf_results:
-            return
-
-        if self.tf_results.get("output"):
-            self.final_output = self.tf_results["output"]
-            self.append_log(self.final_output)
-            del self.tf_results["output"]
-
-        if self.tf_results.get("status") is False:
-            # failed at this point
-            if self.tf_results.get("failed_message"):
-                failed_message = self.tf_results.get("failed_message")
-            else:
-                failed_message = f"Terraform apply {method} failed here {self.run_share_dir}!"
-
-            # this should also be removed further upstream
-            # but included to be explicit
-            self.delete_phases_to_json_file()
-            print(self.final_output)
-
-            # self.logger.error(failed_message)
-            raise Exception(failed_message)
-
-        return True
-
-    # this phase settings that are not currently
-    # being used, but will allow for non-blocking
-    # while tf/opentofu waits to finishes
     def _eval_phases_tf(self,method):
 
         # add feature
@@ -1296,29 +1190,240 @@ terraform {{
 
         return True
 
-    def create(self):
+    def _eval_failure(self,method=None):
 
-        self.init_phase_run()
+        output = None
 
-        if self.phase == "submit":
-            self._init_create()
-            self._exec_tf_apply()
-        elif self.phase == "retrieve":
-            self._exec_tf_apply()
+        if not hasattr(self,"tf_results"):
+            return
+
+        if not self.tf_results:
+            return
+
+        if self.tf_results.get("output"):
+            self.final_output = self.tf_results["output"]
+            self.append_log(self.final_output)
+            del self.tf_results["output"]
+
+        if self.tf_results.get("status") is False:
+            # failed at this point
+            if self.tf_results.get("failed_message"):
+                failed_message = self.tf_results.get("failed_message")
+            else:
+                failed_message = f"Terraform apply {method} failed here {self.run_share_dir}!"
+
+            # this should also be removed further upstream
+            # but included to be explicit
+            self.delete_phases_to_json_file()
+            print(self.final_output)
+
+            # self.logger.error(failed_message)
+            raise Exception(failed_message)
+
+        return True
+
+    def _get_next_phase(self,method="create",**json_info):
+
+        results = json_info["results"]
+        method_phases_params = b64_decode(json_info["phases_params_hash"])[method]
+
+        completed = []
+
+        for phase_info in results["phases_info"]:
+            if phase_info.get("status"):
+                completed.append(phase_info["name"])
+
+        for phase_param in method_phases_params:
+            if phase_param["name"] in completed:
+                self.logger.debug(f'phase "{phase_param["name"]}" completed')
+                continue
+            self.logger.debug(f'Next phase to run: "{phase_param["name"]}"')
+            return phase_param
+
+        os.system(f"rm -rf {self.run_share_dir}")
+
+        self.logger.error("Cannot determine next phase to run - reset")
+        raise Exception("Cannot determine next phase to run")
+
+    def set_cur_phase(self):
+
+        '''
+        self.phases_params_hash = None
+        self.phases_params = None
+        self.phases_info = None
+        self.phase = None  # can be "run" since will only one phase
+        self.current_phase None
+        '''
+
+        self.jsonfile_to_phases_info()
+
+        if self.phases_info and self.phases_info.get("inputargs"):
+            self.set_class_vars(self.phases_info["inputargs"])
+
+        if self.phases_info and self.phases_info.get("phases_params_hash"):
+            self.phases_params_hash = self.phases_info["phases_params_hash"]
         else:
-            self._init_create()
-            self._exec_tf_apply()
+            self.phases_params_hash = os.environ.get("PHASES_PARAMS_HASH")
 
-        self._eval_phases_tf("create")
-        self._eval_failure(method="create")
-        self._post_create()
+        if not self.phases_info and not self.phases_params_hash:
+            self.logger.debug("Phase are not implemented")
+            return
 
-        # this may cause duplication output in log file
-        if not self.printed and self.final_output and not self.build_method == "codebuild":
+        if not self.phases_params_hash and self.phases_params:
+            self.phases_params_hash = b64_encode(self.phases_params)
+        elif not self.phases_params and self.phases_params_hash:
+            self.phases_params = b64_decode(self.phases_params_hash)
+
+        if self.phases_info:
+            self.current_phase = self._get_next_phase(self.method,
+                                                      **self.phases_info)
+        elif self.phases_params_hash:
+            self.logger.json(self.phases_params)
+            self.current_phase = self.phases_params[self.method][0]  # first phase
+
+        self.phase = self.current_phase["name"]
+
+    def _exec_tf(self,method):
+
+        if self.build_method == "codebuild":
+            self.tf_results = self._exec_codebuild(method=method)
+        elif self.build_method == "lambda":
+            self.tf_results = self._exec_lambdabuild(method=method)
+        else:  # execute locally
+            self._create_docker_env_file()
+            self.tf_results = self._exec_docker_local(method=method)
+
+        return self.tf_results
+
+    def _exec_tf_validate(self):
+
+        self._get_runtime_env_vars(method="validate")
+        self._set_build_method()
+        self._exec_tf(method="validate")
+
+        return self.tf_results
+
+    def _exec_tf_destroy(self):
+
+        self._get_runtime_env_vars(method="destroy")
+        self._set_build_method()
+        self._exec_tf(method="destroy")
+
+        return self.tf_results
+
+    def validate(self):
+        self._exec_tf_validate()
+        self._eval_failure(method="validate")
+
+        if not self.printed and self.final_output:
             print(self.final_output)
             self.printed = True
 
         return True
+
+    def destroy(self):
+
+        self.init_phase_run()
+
+        if self.phase == "submit":
+            self._exec_tf_destroy()
+        elif self.phase == "retrieve":
+            self._exec_tf_destroy()
+        else:
+            self._exec_tf_destroy()
+
+        self._eval_phases_tf("destroy") # see if phases
+
+        try:
+            os.chdir(self.cwd)
+        except:
+            os.chdir("/tmp")
+
+        self._eval_failure(method="destroy")
+
+        if not self.printed and self.final_output:
+            print(self.final_output)
+            self.printed = True
+
+        return True
+
+    def create_remote_tf_bkend(self):
+
+        _file = os.path.join(
+            self.run_share_dir,
+            self.app_dir,
+            "backend.tf"
+        )
+
+        contents = f"""\
+terraform {{
+  backend "s3" {{
+    bucket = "{self.remote_stateful_bucket}"
+    key    = "{self.stateful_id}.tfstate"
+    region = "{self.aws_region}"
+  }}
+}}
+
+"""
+
+        with open(_file, "w") as file:
+            file.write(contents)
+
+    def _get_aws_exec_cinputargs(self,method="create"):
+
+        cinputargs = {
+            "method":method,
+            "build_timeout":self.build_timeout,
+            "run_share_dir":self.run_share_dir,
+            "app_dir":self.app_dir,
+            "remote_stateful_bucket":self.remote_stateful_bucket,
+            "aws_region":self.aws_region
+        }
+
+        if self.build_env_vars:
+            cinputargs["build_env_vars"] = self.build_env_vars
+
+        if self.ssm_name:
+            cinputargs["ssm_name"] = self.ssm_name
+
+        if self.phases_info:
+            cinputargs["phases_info"] = self.phases_info
+
+        return cinputargs
+
+    def _exec_codebuild(self,method="create"):
+
+        cinputargs = self._get_aws_exec_cinputargs(method=method)
+        _awsbuild = Codebuild(**cinputargs)
+
+        if self.phase == "retrieve":
+            return _awsbuild.retrieve(**self.get_phase_inputargs())
+
+        # submit and run required env file
+        self.create_build_envfile()
+
+        if self.phase == "submit":
+            return _awsbuild.submit(**self.get_phase_inputargs())
+
+        return _awsbuild.run()
+
+    def _exec_lambdabuild(self,method="create"):
+
+        cinputargs = self._get_aws_exec_cinputargs(method=method)
+        _awsbuild = Lambdabuild(**cinputargs)
+
+        #if self.phase == "retrieve":
+        #    return _awsbuild.retrieve(**self.get_phase_inputargs())
+
+        # submit and run required env file
+        if method == "create":
+            self.create_build_envfile(openssl=False)
+
+        #if self.phase == "submit":
+        #    return _awsbuild.submit(**self.get_phase_inputargs())
+        results = _awsbuild.run()
+
+        return results
 
 def usage():
 
