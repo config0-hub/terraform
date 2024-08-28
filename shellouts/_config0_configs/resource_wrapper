@@ -21,7 +21,7 @@ class Config0ResourceTFVars(object):
     Attributes:
         resource_settings (dict):
           A dictionary of resource settings that include most of the settings/variables for interacting with Terraform.
-          The resource settings are retrieved from the environment variable CONFIG0_RESOURCE_SETTINGS_HASH, which is base64 encoded
+          The resource settings are retrieved from the environment variable CONFIG0_RESOURCE_EXEC_SETTINGS_HASH, which is base64 encoded
 
         resource_values (dict):
           A dictionary of "resource" values to insert into the database.
@@ -105,7 +105,7 @@ class Config0ResourceTFVars(object):
         This method sets the Terraform settings.
         """
         try:
-            self.tf_configs = self.runtime_exec["tf_configs"]
+            self.tf_configs = self.tf_runtime_settings["tf_configs"]
         except:
             self.tf_configs = {}
 
@@ -114,8 +114,7 @@ class Config0ResourceTFVars(object):
 
         self.terraform_type = self.tf_configs.get("terraform_type")
 
-        # ResourceCmdHelper is not terraform aware
-        # so we map it resource accordingly
+        # you can overide the parsing of the terraform state file
         if self.tf_configs.get("tf_exec_postscript_path"):
             self.postscript_path = self.tf_configs["tf_exec_postscript_path"]
         elif self.tf_configs.get("tf_exec_postscript"):
@@ -323,10 +322,10 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
                                      "create")
 
         # set config0 resource settings env var
-        # CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
+        # CONFIG0_RESOURCE_EXEC_SETTINGS_HASH/config0_resource_settings_hash
         self._init_config0_resource_settings()
 
-        # parses env var CONFIG0_RESOURCE_SETTINGS_HASH/config0_resource_settings_hash
+        # parses env var CONFIG0_RESOURCE_EXEC_SETTINGS_HASH/config0_resource_settings_hash
         # sets things like method, phases_params, etc
         Config0ResourceTFVars.__init__(self)
 
@@ -345,7 +344,7 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
         # ref 4353245325
         ResourceCmdHelper.__init__(
             self,
-            main_env_var_key="CONFIG0_RUNTIME_EXEC_HASH",
+            main_env_var_key="TF_RUNTIME_SETTINGS",
             app_name="terraform",
             set_must_exists=set_must_exists,
             set_default_values={
@@ -369,7 +368,7 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
         self.runtime_env_vars = {}
 
         try:
-            env_vars = self.runtime_exec.get("env_vars")  # ref 4532643623642
+            env_vars = self.tf_runtime_settings.get("env_vars")  # ref 4532643623642
         except:
             env_vars = None
 
@@ -385,32 +384,28 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
         """
 
         try:
-            _settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_SETTINGS_HASH"))
+            _settings = b64_decode(os.environ.get("CONFIG0_RESOURCE_EXEC_SETTINGS_HASH"))
         except:
             _settings = {}  # probably destroy
 
         if not _settings:
             return
 
-        resource_exec_hash = _settings.get("resource_exec_hash")
-        runtime_exec_hash  = _settings.get("runtime_exec_hash")
-        common_exec_hash  = _settings.get("common_exec_hash")
+        resource_runtime_settings_hash = _settings.get("resource_runtime_settings_hash")
+        tf_runtime_settings_hash  = _settings.get("tf_runtime_settings_hash")
+        #common_runtime_settings_hash  = _settings.get("common_runtime_settings_hash")
 
-        if resource_exec_hash:
-            os.environ["CONFIG0_RESOURCE_EXEC_HASH"] = resource_exec_hash
-            self.resource_exec = b64_decode(resource_exec_hash)
+        if resource_runtime_settings_hash:
+            self.resource_runtime_settings = b64_decode(resource_runtime_settings_hash)
 
-        if runtime_exec_hash:
-            os.environ["CONFIG0_RUNTIME_EXEC_HASH"] = runtime_exec_hash
-            self.runtime_exec = b64_decode(runtime_exec_hash)
+        if tf_runtime_settings_hash:
+            os.environ["TF_RUNTIME_SETTINGS"] = tf_runtime_settings_hash
+            self.tf_runtime_settings = b64_decode(tf_runtime_settings_hash)
 
-        if common_exec_hash:
-            os.environ["CONFIG0_COMMON_EXEC_HASH"] = common_exec_hash
-
-        self.provider = self.resource_exec.get("provider")
-        self.resource_type = self.resource_exec.get("type")
-        self.resource_values = self.resource_exec.get("values")
-        self.resource_labels = self.resource_exec.get("labels")
+        self.provider = self.resource_runtime_settings.get("provider")
+        self.resource_type = self.resource_runtime_settings.get("type")
+        self.resource_values = self.resource_runtime_settings.get("values")
+        self.resource_labels = self.resource_runtime_settings.get("labels")
 
         if not self.resource_type:
             raise Exception("resource_type needs to be set")
@@ -1187,11 +1182,11 @@ script + environmental variables
 basic:
     main environment variable
         CONFIG0_RESOURCE_SETTINGS - The resource settings are retrieved from the environment variable 
-                                     CONFIG0_RESOURCE_SETTINGS_HASH, which is base64 encoded - this is sanitised
+                                     CONFIG0_RESOURCE_EXEC_SETTINGS_HASH, which is base64 encoded - this is sanitised
         METHOD - This needs to be set
         
     other environment variables
-        TF_EXEC_TEMPLATE_VARS - environmental variables use for templating terraform files (not common)
+        TF_EXEC_TEMPLATE_VARS (not commonly used) - environmental variables use for templating terraform files
        """)
 
 if __name__ == '__main__':
@@ -1199,5 +1194,5 @@ if __name__ == '__main__':
     main = TFExecShellHelper()
 
     # sets "config0_resource_settings_hash" in self.inputargs
-    main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_SETTINGS_HASH"])
+    main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_EXEC_SETTINGS_HASH"])
     main.run()
