@@ -225,6 +225,10 @@ class Config0ResourceTFVars(object):
         except:
             self.logger.warn("_insert_tf_raw b64 failed")
 
+        # this point is used as point for reconfiguring
+        # if the resource is ever updated
+        return self.tfstate_to_output(values)
+
     #####################################################################
     # init and reconfigure (update)
     #####################################################################
@@ -435,7 +439,7 @@ class Config0ResourceTFVars(object):
 
         return data
 
-    def _tfstate_to_output(self,values):
+    def tfstate_to_output(self,values):
 
         try:
             self._insert_tf_outputs(values)
