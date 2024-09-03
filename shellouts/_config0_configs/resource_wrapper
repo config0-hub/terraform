@@ -168,6 +168,15 @@ class Config0ResourceTFVars(Config0ResourceTFVarsCommonConfig):
             "main": True
         }
 
+        # special case of ssm_name/secrets
+        if self.ssm_name:
+            values["ssm_name"] = self.ssm_name
+
+        try:
+            self._insert_tf_raw(values)
+        except:
+            self.logger.warn("_insert_tf_raw b64 failed")
+
         # special cloud specific mappings of resource keys
         if self.provider == "aws":
             self.tf_exec_map_keys.update({"region": "aws_default_region"})
@@ -175,10 +184,6 @@ class Config0ResourceTFVars(Config0ResourceTFVarsCommonConfig):
             self.tf_exec_map_keys.update({"region": "do_region"})
 
         self._insert_resource_values(values)
-
-        # special case of ssm_name/secrets
-        if self.ssm_name:
-            values["ssm_name"] = self.ssm_name
 
         try:
             self._insert_resource_labels(values)
@@ -189,11 +194,6 @@ class Config0ResourceTFVars(Config0ResourceTFVarsCommonConfig):
             self._insert_standard_resource_labels(values)
         except:
             self.logger.warn("_insert_standard resource labels failed")
-
-        try:
-            self._insert_tf_raw(values)
-        except:
-            self.logger.warn("_insert_tf_raw b64 failed")
 
         # this point is used as point for reconfiguring
         # if the resource is ever updated
@@ -685,7 +685,6 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
                       prt=True)
                       # prt=None)
 
-
         if hasattr(self,"tf_results") and self.tf_results:
             self.eval_failure(self.tf_results,
                               "create")
@@ -712,11 +711,11 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
         if self.ssm_name:
             cinputargs["ssm_name"] = self.ssm_name
 
-        tf_binary,tf_version = self.tf_runtime.split(":")
+        binary,version = self.tf_runtime.split(":")
 
         cinputargs.update({
-            "tf_version": tf_version,
-            "tf_binary": tf_binary
+            "version": version,
+            "binary": binary
         })
 
         return cinputargs
@@ -759,7 +758,7 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
         }
 
         # the below will also set class vars
-        # tf_runtime, tf_binary, and tf_version
+        # runtime, binary, and version
         self._insert_tf_env_vars(env_vars)
 
         # Create mod params resource arguments and reference
@@ -813,20 +812,20 @@ class TFExecShellHelper(ResourceCmdHelper,Config0ResourceTFVars):
             self.logger.debug(f'tf_runtime {tf_runtime} - using default"')
 
         try:
-            tf_binary,tf_version = tf_runtime.split(":")
+            binary,version = tf_runtime.split(":")
         except:
             self.logger.debug(f'could not evaluate tf_runtime - using default {tf_runtime}"')
             return "terraform","1.5.4"
 
-        return tf_binary,tf_version
+        return binary,version
 
     def _insert_tf_env_vars(self,env_vars):
 
-        self.tf_binary,self.tf_version = self._get_tf_binary_version()
-        self.tf_runtime = f'{self.tf_binary}:{self.tf_version}'
+        self.binary,self.version = self._get_tf_binary_version()
+        self.tf_runtime = f'{self.binary}:{self.version}'
 
-        env_vars["TF_VERSION"] = self.tf_version
-        env_vars["TF_BINARY"] = self.tf_binary
+        env_vars["TF_VERSION"] = self.version
+        env_vars["TF_BINARY"] = self.binary
         env_vars["TF_RUNTIME"] = self.tf_runtime
 
     def _set_build_method(self):
