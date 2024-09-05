@@ -45,9 +45,7 @@ class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,Testtest45
         # Main input settings as
         # environment var CONFIG0_RESOURCE_EXEC_SETTINGS_HASH
         Config0SettingsEnvVarHelper.__init__(self)
-        self.eval_config0_resource_settings()
-
-        self._apply_tf_runtime_env_vars()
+        self.eval_config0_resource_settings(self.method)
 
         set_must_exists = [
             "tmp_bucket",
@@ -69,10 +67,13 @@ class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,Testtest45
             set_must_exists=set_must_exists,
             set_default_values={
                "failed_destroy": None,
-               "create_remote_state": None,
+               "create_remote_state": True,
+               "tf_runtime_env_vars": None,
                "ssm_name": None
             }
         )
+
+        self._apply_tf_runtime_env_vars()
 
         self.terraform_tfvars = os.path.join(self.exec_dir,
                                              "terraform.tfvars")
@@ -82,6 +83,9 @@ class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,Testtest45
         """
         This method sets the runtime settings.
         """
+
+        if not hasattr(self,"tf_runtime_env_vars"):
+            return
 
         if not self.tf_runtime_env_vars:
             return
@@ -113,5 +117,6 @@ if __name__ == '__main__':
     main = TFExecShellHelper()
 
     # sets "config0_resource_settings_hash" in self.inputargs
+    # ref 34524-4
     main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_EXEC_SETTINGS_HASH"])
     main.run()
