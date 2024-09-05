@@ -52,6 +52,13 @@ class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,Testtest45
             "log_bucket"
         ]
 
+        set_default_values = {
+            "failed_destroy": None,
+            "create_remote_state": None,
+            "tf_runtime_env_vars": None,
+            "ssm_name": None
+        }
+
         if self.method == "create":
             set_must_exists.extend( [
                 "ssm_name",
@@ -59,18 +66,15 @@ class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,Testtest45
                 "remote_stateful_bucket"
             ] )
 
+            set_default_values["create_remote_state"] = True
+
         # ref 4353245325
         ResourceCmdHelper.__init__(
             self,
             main_env_var_key="TF_RUNTIME_SETTINGS",
             app_name="terraform",
             set_must_exists=set_must_exists,
-            set_default_values={
-               "failed_destroy": None,
-               "create_remote_state": True,
-               "tf_runtime_env_vars": None,
-               "ssm_name": None
-            }
+            set_default_values=set_default_values
         )
 
         self._apply_tf_runtime_env_vars()
@@ -107,9 +111,6 @@ basic:
         CONFIG0_RESOURCE_SETTINGS - The resource settings are retrieved from the environment variable 
                                      CONFIG0_RESOURCE_EXEC_SETTINGS_HASH, which is base64 encoded - this is sanitised
         METHOD - This needs to be set
-        
-    other environment variables
-        TF_EXEC_TEMPLATE_VARS (not commonly used) - environmental variables use for templating terraform files
        """)
 
 if __name__ == '__main__':
