@@ -108,8 +108,8 @@ script + environmental variables
 
 basic:
     main environment variable
-        CONFIG0_RESOURCE_SETTINGS - The resource settings are retrieved from the environment variable 
-                                     CONFIG0_RESOURCE_EXEC_SETTINGS_HASH, which is base64 encoded - this is sanitised
+        CONFIG0_RESOURCE_SETTINGS - for creating - it is base64 encoded
+        CONFIG0_BUILD_ENV_VARS - for destroying/validating - it is base64 encoded
         METHOD - This needs to be set
        """)
 
