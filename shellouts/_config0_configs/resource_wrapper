@@ -119,5 +119,6 @@ if __name__ == '__main__':
 
     # sets "config0_resource_settings_hash" in self.inputargs
     # ref 34524-4
-    main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_EXEC_SETTINGS_HASH"])
+    # testtest456
+    #main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_EXEC_SETTINGS_HASH"])
     main.run()
