@@ -1,0 +1,196 @@
+#!/usr/bin/env python
+
+import json
+
+class ConfigureFilterTF:
+
+    def __init__(self,**kwargs):
+
+        self.db_values = kwargs["db_values"]
+        self.tf_filter_params = kwargs["tf_filter_params"]
+        self.tfstate_values = kwargs["tfstate_values"]
+
+        self.remote_stateful_bucket = self.db_values["remote_stateful_bucket"]
+        self.stateful_id = self.db_values["stateful_id"]
+        self.terraform_type = self.db_values["terraform_type"]
+
+    def _init_filter_params(self):
+
+        self.skip_keys= [
+            "sensitive_attributes",
+            "ses_smtp_password_v4",
+        ]
+
+        self.output_skip_keys = [
+            "tags",
+            "label",
+            "tag",
+            "_id",
+            "resource_type",
+            "provider",
+            "labels",
+        ]
+
+        if self.tf_filter_params.get("maps"):
+            self.maps = self.tf_filter_params["maps"]
+        else:
+            self.maps = {}
+
+        if self.tf_filter_params.get("include_keys"):
+            self.include_keys = self.tf_filter_params["include_keys"]
+        else:
+            self.include_keys = []
+
+        self.exclude_keys = [
+            "private",
+            "secret",
+        ]
+
+        if self.tf_filter_params.get("exclude_keys"):
+            self.exclude_keys.extend(self.tf_filter_params["exclude_keys"])
+
+    def _insert_mapped_subkey(self,_insertkey,_refkey):
+
+        if not self.db_values.get(_insertkey):
+            self.db_values[_insertkey] = {}
+
+        for _sub_insertkey,_sub_refkey in _refkey.items():
+            if _sub_refkey not in self.db_values:
+                print(f'mapped ref_key "{_sub_refkey}" not found for sub_insertkey {_sub_insertkey}')
+                continue
+
+            # we only go 2 levels down
+            self.db_values[_insertkey][_sub_insertkey] = self.db_values[_sub_refkey.strip()]
+
+    def _apply_map_keys(self):
+
+        if not self.maps:
+            return
+
+        for _insertkey,_refkey in self.maps.items():
+
+            '''
+            # _insertkey = "p1"
+            # _refkey = "q1"
+
+            # _insertkey = values
+            # _refkey = {"a":"b","c":"d"}
+            # values["values"]["a"] = values["b"]
+            '''
+
+            if self.db_values.get(_insertkey):
+                print(f"mapped key {_insertkey} already exists - clobbering")
+
+            # see if _refkey is a subkey
+            if isinstance(_refkey,dict):
+                self._insert_mapped_subkey(_insertkey,_refkey)
+            elif self.db_values.get(_refkey):
+                self.db_values[_insertkey] = self.db_values[_refkey]
+                print(f'4523465: mapped key ["{_insertkey}"] -> _refkey "{_refkey}"')
+            elif not self.db_values.get(_refkey):
+                print(f'mapped key: refkey not found "{_refkey} for insertkey "{_insertkey}"')
+
+    def _apply_include_keys(self):
+
+        for resource in self.tfstate_values["resources"]:
+
+            if resource["type"] == self.terraform_type:
+
+                print("#" * 32)
+                print("# instance attribute keys")
+                print(list(resource["instances"][0]["attributes"].keys()))
+                print("#" * 32)
+
+                for _key,_value in resource["instances"][0]["attributes"].items():
+
+                    if not _value:
+                        continue
+
+                    if _key in self.db_values:
+                        continue
+
+                    if _key in self.skip_keys:
+                        print(f'skip_keys: tf instance attribute key "{_key}" skipped')
+                        continue
+
+                    # we add if skip_keys not set, all, or key is in it
+                    if not self.include_keys:
+                        _added_bc = "include_key == None"
+                    elif self.include_keys == "all":
+                        _added_bc = "include_key == all"
+                    elif _key in self.include_keys:
+                        _added_bc = f"include_key/key {_key} found"
+                    else:
+                        _added_bc = None
+
+                    if not _added_bc:
+                        print(f"include_keys: key {_key} skipped")
+                        continue
+
+                    if self.db_values.get(_key):
+                        print(f"include_keys: key {_key} values {_value} already exists - skipping")
+                        continue
+
+                    print(f'{_added_bc}: tf key "{_key}" -> value "{_value}" added to resource self.db_values')
+
+                    if isinstance(_value,list):
+                        try:
+                            self.db_values[_key] = ",".join(_value)
+                        except:
+                            self.db_values[_key] = _value
+                    elif isinstance(_value,dict):
+                        try:
+                            self.db_values[_key] = json.dumps(_value)
+                        except:
+                            self.db_values[_key] = _value
+                    else:
+                        self.db_values[_key] = _value
+                break
+
+    def _apply_remove_keys(self):
+
+        if not self.exclude_keys:
+            return
+
+        for _key in self.db_values:
+
+            if _key not in self.exclude_keys:
+                continue
+
+            del self.db_values[_key]
+
+        return
+
+    def _insert_outputs(self):
+
+        try:
+            outputs = self.tfstate_values["outputs"]
+        except:
+            outputs = None
+
+        if not outputs:
+            return
+
+        # put outputs in
+        for k,v in outputs.items():
+
+            # skip certain keys
+            if k in self.output_skip_keys:
+                continue
+
+            # already set and exists
+            if self.db_values.get(k):
+                continue
+
+            self.db_values[k] = v['value']
+
+    def get(self):
+
+        self._init_filter_params()
+
+        self._insert_outputs()
+        self._apply_include_keys()
+        self._apply_map_keys()
+        self._apply_remove_keys()
+
+        return self.db_values

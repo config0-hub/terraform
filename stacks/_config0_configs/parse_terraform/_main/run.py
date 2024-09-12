@@ -1,10 +1,30 @@
+import boto3
+import base64
+import json
+
+def s3_to_tfstate(bucket_name, stateful_id):
+
+    bucket_key = f'{stateful_id}/state/{stateful_id}.tfstate'
+
+    s3 = boto3.client('s3')
+
+    response = s3.get_object(Bucket=bucket_name, Key=bucket_key)
+    base64_data = response['Body'].read().decode('utf-8')
+
+    # Decode the Base64 string
+    json_data = base64.b64decode(base64_data).decode('utf-8')
+
+    # Deserialize the JSON string back to a dictionary
+    data = json.loads(json_data)
+
+    return data
+
 # duplicate wertqttetqwetwqtqwt
 def _insert_standard_resource_labels(values):
 
     std_labels_keys = ["region",
-                       "provider",
-                       "source_method",
-                       "resource_type"]
+                       "provider"
+                       ]
 
     for key in std_labels_keys:
 
@@ -20,11 +40,37 @@ def _insert_standard_resource_labels(values):
 
         values[label_key] = values[key]
 
+def _get_src_resource(stack):
+
+    match = { "must_exists":stack.must_exists,
+              "resource_type": stack.src_resource_type }
+
+    if stack.get_attr("src_resource_name"):
+        match["name"] = stack.src_resource_name
+
+    if stack.get_attr("src_provider"):
+        match["provider"] = stack.src_provider
+
+    return list(stack.get_resource(**match))[0]
+
+def _get_parent_info(resource_info):
+
+    parent_info = {
+    "_id":resource_info["_id"] }
+
+    if resource_info.get("stateful_id"):
+        parent_info["stateful_id"] = resource_info["stateful_id"]
+
+    if resource_info.get("remote_stateful_bucket"):
+        parent_info["remote_stateful_bucket"] = resource_info["remote_stateful_bucket"]
+
+    return parent_info
+
 def run(stackargs):
 
     '''
 
-    # resource add 
+    # resource add
     # resource_type=credentials \
     # name=test_credentials 
     # provider=self \
@@ -42,31 +88,22 @@ def run(stackargs):
     stack.parse.add_required(key="src_resource_type")
     stack.parse.add_optional(key="src_resource_name",default="null") 
     stack.parse.add_optional(key="src_provider",default="null") 
-    stack.parse.add_optional(key="src_labels",default="null") 
+    stack.parse.add_optional(key="src_labels",default="null")
+    stack.parse.add_optional(key="must_exists",default="true")
 
     stack.parse.add_required(key="dst_terraform_type")
     stack.parse.add_required(key="dst_resource_type")
-    stack.parse.add_optional(key="dst_terraform_mode",default="null")
     stack.parse.add_optional(key="dst_prefix_name",default="null")
-
-    stack.parse.add_optional(key="match",default="null") 
-
-    stack.parse.add_optional(key="id",default="null") 
-    stack.parse.add_optional(key="must_exists",default="true") 
-
     stack.parse.add_optional(key="add_values",default="null")
-    stack.parse.add_optional(key="labels",default="null")
-    stack.parse.add_optional(key="tags",default="null")
 
-    # mapping is for additing additional fields based on another field
-    # for example, id is the same as sg_id for security group id
-    # this allows for querying or lookup on a more logical field
+    # mapping is for adding fields
     stack.parse.add_optional(key="mapping",default="null")
 
     # Initialize 
     stack.init_variables()
 
     add_values = None
+    mapping = None
 
     if stack.get_attr("add_values"):
         try:
@@ -74,50 +111,27 @@ def run(stackargs):
         except:
             add_values = None
 
-    mapping = None
-
     if stack.get_attr("mapping"):
         try:
             mapping = json.loads(stack.mapping)
         except:
             mapping = None
 
+    # get terraform resource
+    src_resource = _get_src_resource(stack)
+
+    data = s3_to_tfstate(src_resource["remote_stateful_bucket"],
+                         src_resource["stateful_id"])
+
     stack.set_parallel()
 
-    # get terraform resource
-    if stack.get_attr("match"):
-        match = stack.match
-    else:
-        match = { "must_exists":stack.must_exists,
-                  "resource_type": stack.src_resource_type }
-
-        if stack.get_attr("src_resource_name"):
-            match["name"] = stack.src_resource_name
-
-        if stack.get_attr("id"):
-            match["id"] = stack.id
-
-        if stack.get_attr("src_provider"):
-            match["provider"] = stack.src_provider
-
-    _resource_info = list(stack.get_resource(**match))[0]
-    main_id = _resource_info.get("_id")
-    main_stateful_id = _resource_info.get("stateful_id")
-
-    # changed 45234532 - moved over to b64 hash
-    try:
-        data = stack.b64_decode(_resource_info["raw"]["terraform"])
-    except:
-        data = None
-
-    if not data:
-        try:
-            data = _resource_info["raw"]["terraform"]
-        except:
-            data = None
-
-    if not data:
-        raise Exception("expected terraform state in raw - not found.")
+    transfer_keys = [
+        "cluster",
+        "instance",
+        "schedule_id",
+        "job_instance_id",
+        "run_id"
+    ]
 
     for resource in data["resources"]:
         for instance in resource["instances"]:
@@ -151,25 +165,13 @@ def run(stackargs):
                 values["provider"] = stack.src_provider
                 _results["provider"] = stack.src_provider
 
-            if stack.get_attr("cluster"): 
-                values["cluster"] = stack.cluster
-                _results["cluster"] = stack.cluster
-                
-            if stack.get_attr("instance"): 
-                values["instance"] = stack.instance
-                _results["instance"] = stack.instance
+            for tkey in transfer_keys:
 
-            if stack.get_attr("schedule_id"): 
-                values["schedule_id"] = stack.schedule_id
-                _results["schedule_id"] = stack.schedule_id
+                if not stack.get_attr(tkey):
+                    continue
 
-            if stack.get_attr("job_instance_id"): 
-                values["job_instance_id"] = stack.job_instance_id
-                _results["job_instance_id"] = stack.job_instance_id
-
-            if stack.get_attr("run_id"): 
-                values["run_id"] = stack.run_id
-                _results["run_id"] = stack.run_id
+                values[tkey] = getattr(stack, tkey)
+                _results[tkey] = getattr(stack, tkey)
 
             # AWS specific changes
             if values.get("provider") in [ "aws", "ec2" ] and values.get("arn"):
@@ -177,37 +179,22 @@ def run(stackargs):
                 if not values.get("region"): 
                     values["region"] = values["arn"].split(":")[3]
 
-                if values.get("tags"): 
-                    if isinstance(values["tags"],dict):
-                        values["tags"] = list(values["tags"].values())
-                    else:
-                        del values["tags"]
+                if values.get("tags") and isinstance(values["tags"],dict):
+                    values["tags"] = list(values["tags"].values())
+                else:
+                    del values["tags"]
 
             _id = stack.get_hash_object(values)
             values["_id"] = _id
             values["id"] = _id
-            values["parent"] = {}
-
-            if main_id:
-                values["parent"]["_id"] = main_id
-                values[main_id] = True
-
-            if main_stateful_id:
-                values["parent"]["stateful_id"] = main_stateful_id
-                values[main_stateful_id] = True
-
+            values["parent"] = _get_parent_info(src_resource)
             _insert_standard_resource_labels(values)
+
             values["source_method"] = "parse_terraform"
+
             _results["values"] = values
-
-            human_description = 'Adding resource_type "{}" id "{}"'.format(values.get("resource_type"),_id)
+            human_description = f'Adding resource_type "{values.get("resource_type")}" id "{_id}"'
             _results["human_description"] = human_description
-
-            if stack.get_attr("labels"):
-                _results["labels"] = stack.labels
-
-            if stack.get_attr("tags"):
-                _results["tags"] = stack.tags
 
             stack.add_resource(**_results)
 
