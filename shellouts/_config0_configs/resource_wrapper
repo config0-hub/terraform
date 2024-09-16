@@ -5,11 +5,12 @@ import json
 from ast import literal_eval
 
 from config0_publisher.loggerly import Config0Logger
-from config0_publisher.resource.tf_configure import Config0SettingsEnvVarHelper
-from config0_publisher.resource.tf_configure import get_tfstate_file_remote
-from config0_publisher.resource.tf_configure import tf_iter_to_str
-from config0_publisher.resource.tf_configure import get_tf_bool
 from config0_publisher.resource.manage import ResourceCmdHelper
+
+from config0_publisher.resource.config0_settings_env_vars import Config0SettingsEnvVarHelper
+from config0_publisher.resource.tf_configure import get_tfstate_file_remote
+from config0_publisher.resource.tf_vars import tf_iter_to_str
+from config0_publisher.resource.tf_vars import get_tf_bool
 from config0_publisher.serialization import b64_encode
 from config0_publisher.resource.codebuild import Codebuild
 from config0_publisher.resource.lambdabuild import Lambdabuild

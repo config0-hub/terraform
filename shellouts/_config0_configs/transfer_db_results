@@ -7,8 +7,8 @@ class ConfigureFilterTF:
     def __init__(self,**kwargs):
 
         self.db_values = kwargs["db_values"]
-        self.tf_filter_params = kwargs["tf_filter_params"]
         self.tfstate_values = kwargs["tfstate_values"]
+        self.tf_filter_params = kwargs["tf_filter_params"]
 
         self.remote_stateful_bucket = self.db_values["remote_stateful_bucket"]
         self.stateful_id = self.db_values["stateful_id"]
