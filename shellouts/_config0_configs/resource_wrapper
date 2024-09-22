@@ -14,7 +14,6 @@ from config0_publisher.resource.codebuild import Codebuild
 from config0_publisher.resource.lambdabuild import Lambdabuild
 from config0_publisher.resource.tf_configure import ConfigureTFConfig0Db
 from config0_publisher.serialization import b64_decode
-#from config0_publisher.resource.tf_configure import get_tfstate_file_remote
 #from config0_publisher.serialization import b64_encode
 
 class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,ConfigureTFConfig0Db):
@@ -386,6 +385,4 @@ if __name__ == '__main__':
 
     # sets "config0_resource_settings_hash" in self.inputargs
     # ref 34524-4
-    # testtest456
-    #main.set_inputargs(set_env_vars=["CONFIG0_RESOURCE_EXEC_SETTINGS_HASH"])
     main.run()
