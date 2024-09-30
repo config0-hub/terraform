@@ -162,21 +162,19 @@ class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,ConfigureT
                     _value = _input["value"]
                     _quoted = True
 
-                self.logger.debug("_create_terraform_tfvars (new_format): {} -> <{}> {}".format(_key,
-                                                                                                _type,
-                                                                                                _value))
+                self.logger.debug(f"_create_terraform_tfvars (new_format): {_key} -> <{_type}> {_value}")
 
                 if _quoted:
-                    _entry = '{} \t= "{}"'.format(_key,_value)
+                    _entry = f'{_key} \t= "{_value}"'
                 else:
-                    _entry = '{} \t= {}'.format(_key,_value)
+                    _entry = f'{_key} \t= {_value}'
 
                 f.write(_entry)
                 f.write("\n")
 
         self.logger.debug("*" * 32)
         self.logger.debug("")
-        self.logger.debug("Wrote terraform.tfvars: {}".format(self.terraform_tfvars))
+        self.logger.debug(f"Wrote terraform.tfvars: {self.terraform_tfvars}")
         self.logger.debug("")
         self.logger.debug("*" * 32)
 
@@ -317,7 +315,7 @@ terraform {{
             self.exclude_tfvars = self._create_terraform_tfvars()
 
         if not os.path.exists(self.exec_dir):
-            failed_message = "terraform directory must exists at {} when creating tf".format(self.exec_dir)
+            failed_message = f"terraform directory must exists at {self.exec_dir} when creating tf"
             raise Exception(failed_message)
 
         self._set_runtime_env_vars(method="create")
@@ -364,7 +362,7 @@ terraform {{
             self._setup_and_exec_in_aws("check")
         else:
             usage()
-            print('method "{}" not supported!'.format(self.method))
+            print(f'method "{self.method}" not supported!')
             exit(4)
 
 def usage():
