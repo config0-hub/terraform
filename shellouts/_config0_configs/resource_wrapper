@@ -276,9 +276,6 @@ terraform {{
 
         results = _awsbuild.run()
 
-        self.eval_log(results,
-                      prt=True)
-
         if method == "destroy":
             try:
                 os.chdir(self.cwd)
@@ -353,17 +350,22 @@ terraform {{
         self._set_build_method()
 
         if self.method == "create":
-            self.create()
+            tf_results = self.create()
         elif self.method == "destroy":
-            self._setup_and_exec_in_aws("destroy")
+            tf_results = self._setup_and_exec_in_aws("destroy")
         elif self.method == "validate":
-            self._setup_and_exec_in_aws("validate")
+            tf_results = self._setup_and_exec_in_aws("validate")
         elif self.method == "check":
-            self._setup_and_exec_in_aws("check")
+            tf_results = self._setup_and_exec_in_aws("check")
         else:
             usage()
             print(f'method "{self.method}" not supported!')
             exit(4)
+
+        # eval of log should be at the end
+        # outside of _exec_in_aws
+        self.eval_log(tf_results,
+                      local_log=True)
 
 def usage():
 
