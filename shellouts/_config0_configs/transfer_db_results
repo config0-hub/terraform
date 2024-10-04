@@ -22,13 +22,13 @@ class ConfigureFilterTF:
         ]
 
         self.output_skip_keys = [
-            "tags",
-            "label",
-            "tag",
             "_id",
+            "label",
+            "tags",
+            "tag",
             "resource_type",
             "provider",
-            "labels",
+            "labels"
         ]
 
         if self.tf_filter_params.get("maps"):
