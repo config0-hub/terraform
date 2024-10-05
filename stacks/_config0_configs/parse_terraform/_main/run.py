@@ -8,11 +8,15 @@ def s3_to_tfstate(bucket_name, stateful_id):
 
     s3 = boto3.client('s3')
 
-    response = s3.get_object(Bucket=bucket_name, Key=bucket_key)
+    response = s3.get_object(Bucket=bucket_name,
+                             Key=bucket_key)
+
     base64_data = response['Body'].read().decode('utf-8')
 
-    # Decode the Base64 string
-    json_data = base64.b64decode(base64_data).decode('utf-8')
+    try:
+        json_data = base64.b64decode(base64_data).decode('utf-8')
+    except:
+        json_data = base64_data
 
     # Deserialize the JSON string back to a dictionary
     data = json.loads(json_data)
