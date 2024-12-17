@@ -1,0 +1,14 @@
+desc: The stack parses terraform file and inserts into resource table.
+release: 0.0.1
+categories: 
+   - parse
+   - public
+   - public_cloud
+   - terraform
+   - infrastructure
+tags:
+   - public
+   - parse
+   - terraform
+   - infrastructure
+   - public_cloud

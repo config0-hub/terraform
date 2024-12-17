@@ -1,0 +1,389 @@
+#!/usr/bin/env python
+
+import os
+import json
+from ast import literal_eval
+
+from config0_publisher.loggerly import Config0Logger
+from config0_publisher.resource.manage import ResourceCmdHelper
+
+from config0_publisher.resource.config0_settings_env_vars import Config0SettingsEnvVarHelper
+from config0_publisher.resource.tf_vars import tf_iter_to_str
+from config0_publisher.resource.tf_vars import get_tf_bool
+from config0_publisher.resource.codebuild import Codebuild
+from config0_publisher.resource.lambdabuild import Lambdabuild
+from config0_publisher.resource.tf_configure import ConfigureTFConfig0Db
+from config0_publisher.serialization import b64_decode
+#from config0_publisher.serialization import b64_encode
+
+class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,ConfigureTFConfig0Db):
+
+    def __init__(self):
+
+        '''
+
+        # ref 4353245325
+        #self.shelloutconfig = "config0-publish:::{}::resource_wrapper".format(self.app_name)
+
+        '''
+
+        self.classname = 'TerraformWrapper'
+
+        self.logger = Config0Logger(self.classname,
+                                    logcategory="cloudprovider")
+
+        self.logger.debug("Instantiating %s" % self.classname)
+
+        self.method = os.environ.get("METHOD",
+                                     "create")
+
+        ConfigureTFConfig0Db.__init__(self)
+
+        # Main input settings as
+        # environment var CONFIG0_RESOURCE_EXEC_SETTINGS_HASH
+        Config0SettingsEnvVarHelper.__init__(self)
+        self.eval_config0_resource_settings(self.method)
+
+        set_must_exists = [
+            "tmp_bucket",
+            "log_bucket"
+        ]
+
+        set_default_values = {
+            "failed_destroy": None,
+            "create_remote_state": None,
+            "tf_runtime_env_vars": None,
+            "ssm_name": None
+        }
+
+        if self.method == "create":
+            set_must_exists.extend( [
+                "ssm_name",
+                "stateful_id",
+                "remote_stateful_bucket"
+            ] )
+
+            set_default_values["create_remote_state"] = True
+
+        # ref 4353245325
+        ResourceCmdHelper.__init__(
+            self,
+            main_env_var_key="TF_RUNTIME_SETTINGS",
+            app_name="terraform",
+            set_must_exists=set_must_exists,
+            set_default_values=set_default_values
+        )
+
+        self._apply_tf_runtime_env_vars()
+
+        self.terraform_tfvars = os.path.join(self.exec_dir,
+                                             "terraform.tfvars")
+
+    def _set_runtime_env_vars(self,method="create"):
+
+        # ref 43532453
+        # build_env_vars only needed when initially creating
+        if method != "create":
+            return
+
+        try:
+            exclude_vars = list(self.tf_configs["tf_vars"].keys())
+        except:
+            exclude_vars = self.exclude_tfvars
+
+        # insert TF_VAR_* os vars
+        self.insert_os_env_prefix_envs(self.build_env_vars,
+                                       exclude_vars)
+
+        # this should be set by ResourceCmdHelper
+        self.build_env_vars["BUILD_TIMEOUT"] = self.build_timeout  # this should be set by Config0SettingsEnvVarHelper
+
+        if self.docker_image:  # this should be set by Config0SettingsEnvVarHelper
+            self.build_env_vars["DOCKER_IMAGE"] = self.docker_image
+
+        if self.runtime_env_vars:
+            for _k,_v in self.runtime_env_vars.items():
+                self.build_env_vars[_k] = _v
+
+        self.build_env_vars["TF_RUNTIME"] = self.tf_runtime  # this should be set by Config0SettingsEnvVarHelper
+        self.build_env_vars["SHARE_DIR"] = self.share_dir  # this should be set by ResourceCmdHelper
+        self.build_env_vars["RUN_SHARE_DIR"] = self.run_share_dir  # this should be set by ResourceCmdHelper
+        self.build_env_vars["LOG_BUCKET"] = self.log_bucket  # this should be set by ResourceCmdHelper
+        self.build_env_vars["TMP_BUCKET"] = self.tmp_bucket  # this should be set by ResourceCmdHelper
+        self.build_env_vars["STATEFUL_ID"] = self.stateful_id  # this should be set by ResourceCmdHelper
+        self.build_env_vars["APP_DIR"] = self.app_dir  # this should be set by ResourceCmdHelper
+        self.build_env_vars["APP_NAME"] = self.app_name  # this should be set by ResourceCmdHelper
+        self.build_env_vars["REMOTE_STATEFUL_BUCKET"] = self.remote_stateful_bucket  # this should be set by ResourceCmdHelper
+        self.build_env_vars["TMPDIR"] = "/tmp"
+
+        # ssm name setting
+        if self.build_env_vars.get("SSM_NAME"):  # usually set in create
+            self.ssm_name = self.build_env_vars["SSM_NAME"]
+        elif os.environ.get("SSM_NAME"):
+            self.ssm_name = os.environ["SSM_NAME"]
+            self.build_env_vars["SSM_NAME"] = self.ssm_name
+
+        return
+
+    # create terraform.tfvars file from TF_VAR_* variabless
+    def _create_terraform_tfvars(self):
+
+        if self.tf_configs and self.tf_configs.get("tf_vars"):
+            _tfvars = self.tf_configs["tf_vars"]
+        else:
+            _tfvars = self.get_os_env_prefix_envs()
+
+        if not _tfvars:
+            return
+
+        with open(self.terraform_tfvars,"w") as f:
+
+            for _key,_input in _tfvars.items():
+                _type = _input["type"]
+
+                if _type == "dict":
+                    _value = tf_iter_to_str(_input["value"])
+                    _quoted = None
+                elif _type == "list":
+                    _value = tf_iter_to_str(_input["value"])
+                    _quoted = None
+                elif _type == "bool":
+                    _quoted = None
+                    _value = get_tf_bool(_input["value"])
+                elif _type == "float":
+                    _value = _input["value"]
+                    _quoted = None
+                elif _type == "int":
+                    _value = _input["value"]
+                    _quoted = None
+                else:
+                    _value = _input["value"]
+                    _quoted = True
+
+                self.logger.debug(f"_create_terraform_tfvars (new_format): {_key} -> <{_type}> {_value}")
+
+                if _quoted:
+                    _entry = f'{_key} \t= "{_value}"'
+                else:
+                    _entry = f'{_key} \t= {_value}'
+
+                f.write(_entry)
+                f.write("\n")
+
+        self.logger.debug("*" * 32)
+        self.logger.debug("")
+        self.logger.debug(f"Wrote terraform.tfvars: {self.terraform_tfvars}")
+        self.logger.debug("")
+        self.logger.debug("*" * 32)
+
+        return _tfvars.keys()
+
+    # aws codebuild/lambda are the tf executors for apply/destroy/apply/pre-create/validate
+    def _get_aws_exec_cinputargs(self,method="create"):
+
+        cinputargs = {
+            "method": method,
+            "build_timeout": self.build_timeout,
+            "run_share_dir": self.run_share_dir,
+            "app_dir": self.app_dir,
+            "remote_stateful_bucket": self.remote_stateful_bucket,
+            "aws_region": self.aws_region
+        }
+
+        # usually associated with create
+        if method in ["apply","create","pre-create"]:
+            if self.build_env_vars:
+                cinputargs["build_env_vars"] = self.build_env_vars
+
+            if self.ssm_name:
+                cinputargs["ssm_name"] = self.ssm_name
+
+        # usually associated with destroy/validate/check
+        elif os.environ.get("CONFIG0_BUILD_ENV_VARS"):
+            cinputargs["build_env_vars"] = b64_decode(os.environ["CONFIG0_BUILD_ENV_VARS"])
+
+        cinputargs.update({
+            "version": self.version,
+            "binary": self.binary,
+            "tf_runtime": self.tf_runtime
+        })
+
+        return cinputargs
+
+    def _set_build_method(self):
+
+        if os.environ.get("USE_CODEBUILD"):  # longer than 900 seconds
+            self.build_method = "codebuild"
+        elif os.environ.get("USE_LAMBDA"):  # shorter than 900 seconds
+            self.build_method = "lambda"
+        elif self.method in ["validate", "check", "pre-create"]:
+            self.build_method = "lambda"
+        elif os.environ.get("USE_AWS",True):  # select codebuild or lambda
+            if int(self.build_timeout) > 600:
+                self.build_method = "codebuild"
+            else:
+                self.build_method = "lambda"
+        else:  # the default
+            self.build_method = "lambda"
+
+    def create_aws_tf_backend(self):
+
+        _file = os.path.join(
+            self.run_share_dir,
+            self.app_dir,
+            "backend.tf"
+        )
+
+        contents = f"""\
+terraform {{
+  backend "s3" {{
+    bucket = "{self.remote_stateful_bucket}"
+    key    = "{self.stateful_id}/state/{self.stateful_id}.tfstate"
+    region = "{self.aws_region}"
+  }}
+}}
+
+"""
+        with open(_file,"w") as file:
+            file.write(contents)
+
+    def _setup_and_exec_in_aws(self,method,create_remote_state=None):
+
+        self._set_runtime_env_vars(method=method)
+
+        # use backend to track state file
+        if create_remote_state:
+            self.create_aws_tf_backend()
+
+        return self._exec_in_aws(method=method)
+
+    def _exec_in_aws(self,method="create"):
+
+        cinputargs = self._get_aws_exec_cinputargs(method=method)
+
+        _awsbuild_lambda = Lambdabuild(**cinputargs)
+
+        # ref 435353245634
+        # mod params and env_vars
+        if self.build_method == "lambda":
+            _awsbuild = _awsbuild_lambda
+        elif self.build_method == "codebuild":
+            _awsbuild = Codebuild(**cinputargs)
+        else:
+            return False
+
+        results = _awsbuild.run()
+
+        if method == "destroy":
+            try:
+                os.chdir(self.cwd)
+            except:
+                os.chdir("/tmp")
+
+        self.eval_failure(results,
+                          method)
+
+        return results
+
+    # only use for creation
+    def _apply_tf_runtime_env_vars(self):
+        """
+        This method sets the runtime settings.
+        """
+
+        if not hasattr(self,"tf_runtime_env_vars"):
+            return
+
+        if not self.tf_runtime_env_vars:
+            return
+
+        for _k, _v in self.tf_runtime_env_vars.items():
+            self.runtime_env_vars[_k.upper()] = _v
+
+    def create(self):
+
+        if not self.stateful_id:
+            self.logger.error("STATEFUL_ID needs to be set")
+
+        # if we render template files, we don't create tfvars file
+        if not self.templify(app_template_vars="TF_EXEC_TEMPLATE_VARS",**self.inputargs):
+            self.exclude_tfvars = self._create_terraform_tfvars()
+
+        if not os.path.exists(self.exec_dir):
+            failed_message = f"terraform directory must exists at {self.exec_dir} when creating tf"
+            raise Exception(failed_message)
+
+        self._set_runtime_env_vars(method="create")
+        self.create_aws_tf_backend()
+
+        # submit and run required env file
+        # ref 4354523
+        self.create_build_envfile()
+
+        if self.build_method == "codebuild":
+            self.build_method = "lambda"  # we run pre-create in lambda first
+            _use_codebuild = True
+        else:
+            _use_codebuild = None
+
+        pre_creation = self._exec_in_aws(method="pre-create")
+
+        if not pre_creation.get("status"):
+            self.logger.error("pre-create failed")
+            return pre_creation
+
+        if _use_codebuild:
+            self.build_method = 'codebuild'
+
+        tf_results = self._exec_in_aws(method="create")
+
+        # if should never get this far
+        # b/c of eval_failure should exit out
+        if not tf_results.get("status"):
+            return tf_results
+
+        self.post_create()
+
+        return tf_results
+
+    def run(self):
+
+        self._set_build_method()
+
+        if self.method == "create":
+            tf_results = self.create()
+        elif self.method == "destroy":
+            tf_results = self._setup_and_exec_in_aws("destroy")
+        elif self.method == "validate":
+            tf_results = self._setup_and_exec_in_aws("validate")
+        elif self.method == "check":
+            tf_results = self._setup_and_exec_in_aws("check")
+        else:
+            usage()
+            print(f'method "{self.method}" not supported!')
+            exit(4)
+
+        # eval of log should be at the end
+        # outside of _exec_in_aws
+        self.eval_log(tf_results,
+                      local_log=True)
+
+def usage():
+
+    print("""
+script + environmental variables
+
+basic:
+    main environment variable
+        CONFIG0_RESOURCE_SETTINGS - for creating - it is base64 encoded
+        CONFIG0_BUILD_ENV_VARS - for destroying/validating - it is base64 encoded
+        METHOD - This needs to be set
+       """)
+
+if __name__ == '__main__':
+
+    main = TFExecShellHelper()
+
+    # sets "config0_resource_settings_hash" in self.inputargs
+    # ref 34524-4
+    main.run()
