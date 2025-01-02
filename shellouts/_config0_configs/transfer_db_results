@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import json
-import os
 
 class ConfigureFilterTF:
 
@@ -93,11 +92,18 @@ class ConfigureFilterTF:
 
     def _apply_include_keys(self):
 
+        import os
+
+        try:
+            _debug = os.environ.get("DEBUG_RESOURCE")
+        except:
+            _debug = False
+
         for resource in self.tfstate_values["resources"]:
 
             if resource["type"] == self.terraform_type:
 
-                if os.environ.get("DEBUG_RESOURCE"):
+                if _debug:
                     print("#" * 32)
                     print("# instance attribute keys")
                     print(list(resource["instances"][0]["attributes"].keys()))
