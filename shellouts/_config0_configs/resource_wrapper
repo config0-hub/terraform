@@ -20,13 +20,6 @@ class TFExecShellHelper(ResourceCmdHelper,Config0SettingsEnvVarHelper,ConfigureT
 
     def __init__(self):
 
-        '''
-
-        # ref 4353245325
-        #self.shelloutconfig = "config0-publish:::{}::resource_wrapper".format(self.app_name)
-
-        '''
-
         self.classname = 'TerraformWrapper'
 
         self.logger = Config0Logger(self.classname,
@@ -383,7 +376,6 @@ basic:
 if __name__ == '__main__':
 
     main = TFExecShellHelper()
-
     # sets "config0_resource_settings_hash" in self.inputargs
     # ref 34524-4
     main.run()
