@@ -12,7 +12,10 @@ class ConfigureFilterTF:
 
         self.remote_stateful_bucket = self.db_values["remote_stateful_bucket"]
         self.stateful_id = self.db_values["stateful_id"]
-        self.terraform_type = self.db_values["terraform_type"]
+        self.terraform_type = self.db_values.get("terraform_type")
+
+        if not self.terraform_type:
+            raise Exception("terraform_type needs to be set to apply filter")
 
     def _init_filter_params(self):
 
