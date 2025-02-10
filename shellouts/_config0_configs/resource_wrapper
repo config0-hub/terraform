@@ -239,7 +239,7 @@ terraform {{
   backend "s3" {{
     bucket = "{self.remote_stateful_bucket}"
     key    = "{self.stateful_id}/state/{self.stateful_id}.tfstate"
-    region = "{self.aws_region}"
+    region = "{self.aws_backend_region}"
   }}
 }}
 
