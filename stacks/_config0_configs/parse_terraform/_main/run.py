@@ -72,17 +72,6 @@ def _get_parent_info(resource_info):
 
 def run(stackargs):
 
-    '''
-
-    # resource add
-    # resource_type=credentials \
-    # name=test_credentials 
-    # provider=self \
-    # cred_type=test_type \
-    # values='{"USERNAME":"test_user","PASSWORD":"test_password"}'
-
-    '''
-
     import json
 
     # instantiate authoring stack
