@@ -1,0 +1,271 @@
+#!/usr/bin/env python
+"""
+Terraform State Filter Module.
+
+This module provides functionality to filter, map, and transform Terraform state
+values for integration with other systems.
+"""
+
+# Copyright 2025 Gary Leong <gary@config0.com>
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import json
+import os
+
+
+class ConfigureFilterTF:
+    """
+    Filter and transform Terraform state values.
+    
+    This class provides methods to process Terraform state output,
+    apply filtering rules, and prepare the data for storage or further
+    processing.
+    """
+
+    def __init__(self, **kwargs):
+        """
+        Initialize the Terraform state filter.
+        
+        Args:
+            db_values (dict): Current database values to update
+            tfstate_values (dict): Values from Terraform state
+            tf_filter_params (dict): Parameters controlling filtering behavior
+        """
+        self.db_values = kwargs["db_values"]
+        self.tfstate_values = kwargs["tfstate_values"]
+        self.tf_filter_params = kwargs["tf_filter_params"]
+
+        self.remote_stateful_bucket = self.db_values["remote_stateful_bucket"]
+        self.stateful_id = self.db_values["stateful_id"]
+        self.terraform_type = self.db_values.get("terraform_type")
+
+    def _init_filter_params(self):
+        """
+        Initialize filtering parameters.
+        
+        Sets up skip keys, output skip keys, maps, include keys, and exclude
+        keys based on configuration.
+        """
+        self.skip_keys = [
+            "sensitive_attributes",
+            "ses_smtp_password_v4",
+        ]
+
+        self.output_skip_keys = [
+            "_id",
+            "label",
+            "tags",
+            "tag",
+            "resource_type",
+            "provider",
+            "labels"
+        ]
+
+        # Initialize maps for key transformation
+        if self.tf_filter_params.get("maps"):
+            self.maps = self.tf_filter_params["maps"]
+        else:
+            self.maps = {}
+
+        # Initialize include keys for filtering
+        if self.tf_filter_params.get("include_keys"):
+            self.include_keys = self.tf_filter_params["include_keys"]
+        else:
+            self.include_keys = []
+
+        # Initialize exclude keys
+        self.exclude_keys = [
+            "private",
+            "secret",
+        ]
+
+        if self.tf_filter_params.get("exclude_keys"):
+            self.exclude_keys.extend(self.tf_filter_params["exclude_keys"])
+
+    def _insert_mapped_subkey(self, insert_key, ref_key):
+        """
+        Insert mapped subkeys into the database values.
+        
+        Args:
+            insert_key (str): Key to insert into
+            ref_key (dict): Dictionary of subkeys to reference keys
+        """
+        if not self.db_values.get(insert_key):
+            self.db_values[insert_key] = {}
+
+        for sub_insert_key, sub_ref_key in ref_key.items():
+            if sub_ref_key not in self.db_values:
+                print(f'Mapped ref_key "{sub_ref_key}" not found for sub_insert_key {sub_insert_key}')
+                continue
+
+            # We only go 2 levels down
+            self.db_values[insert_key][sub_insert_key] = self.db_values[sub_ref_key.strip()]
+
+    def _apply_map_keys(self):
+        """
+        Apply key mapping rules to transform keys in database values.
+        
+        Maps keys according to the specified mapping rules in self.maps.
+        """
+        if not self.maps:
+            return
+
+        for insert_key, ref_key in self.maps.items():
+            """
+            Examples:
+            - insert_key = "p1", ref_key = "q1"
+              Result: db_values["p1"] = db_values["q1"]
+              
+            - insert_key = "values", ref_key = {"a":"b","c":"d"}
+              Result: db_values["values"]["a"] = db_values["b"]
+                      db_values["values"]["c"] = db_values["d"]
+            """
+            if self.db_values.get(insert_key):
+                print(f"Mapped key {insert_key} already exists - clobbering")
+
+            # Check if ref_key is a subkey dictionary
+            if isinstance(ref_key, dict):
+                self._insert_mapped_subkey(insert_key, ref_key)
+            elif self.db_values.get(ref_key):
+                self.db_values[insert_key] = self.db_values[ref_key]
+                print(f'Mapped key ["{insert_key}"] -> ref_key "{ref_key}"')
+            else:
+                print(f'Mapped key: ref_key not found "{ref_key}" for insert_key "{insert_key}"')
+
+    def _apply_include_keys(self):
+        """
+        Apply include key rules to add terraform state attributes to database values.
+        
+        Processes terraform state and adds keys based on include_keys settings.
+        """
+        debug = os.environ.get("DEBUG_RESOURCE", False)
+
+        for resource in self.tfstate_values["resources"]:
+            if resource["type"] == self.terraform_type:
+                if debug:
+                    print("#" * 32)
+                    print("# Instance attribute keys")
+                    print(list(resource["instances"][0]["attributes"].keys()))
+                    print("#" * 32)
+
+                for key, value in resource["instances"][0]["attributes"].items():
+                    # Skip empty values or keys already in db_values
+                    if not value or key in self.db_values:
+                        continue
+
+                    # Skip explicitly defined skip keys
+                    if key in self.skip_keys:
+                        print(f'Skip_keys: tf instance attribute key "{key}" skipped')
+                        continue
+
+                    # Determine whether to add this key based on include_keys
+                    if not self.include_keys:
+                        added_reason = "include_key == None"
+                    elif self.include_keys == "all":
+                        added_reason = "include_key == all"
+                    elif key in self.include_keys:
+                        added_reason = f"include_key/key {key} found"
+                    else:
+                        added_reason = None
+
+                    if not added_reason:
+                        print(f"Include_keys: key {key} skipped")
+                        continue
+
+                    if self.db_values.get(key):
+                        print(f"Include_keys: key {key} values {value} already exists - skipping")
+                        continue
+
+                    print(f'{added_reason}: tf key "{key}" -> value "{value}" added to resource self.db_values')
+
+                    # Convert values to appropriate formats
+                    if isinstance(value, list):
+                        try:
+                            self.db_values[key] = ",".join(value)
+                        except (TypeError, ValueError):
+                            self.db_values[key] = value
+                    elif isinstance(value, dict):
+                        try:
+                            self.db_values[key] = json.dumps(value)
+                        except (TypeError, ValueError):
+                            self.db_values[key] = value
+                    else:
+                        self.db_values[key] = value
+                break
+
+    def _apply_remove_keys(self):
+        """
+        Remove excluded keys from database values.
+        
+        Removes keys listed in self.exclude_keys from the final output.
+        """
+        if not self.exclude_keys:
+            return
+
+        keys_to_remove = []
+        for key in self.db_values:
+            if key in self.exclude_keys:
+                keys_to_remove.append(key)
+                
+        # Remove keys in a separate loop to avoid modifying during iteration
+        for key in keys_to_remove:
+            del self.db_values[key]
+
+    def _insert_outputs(self):
+        """
+        Insert terraform outputs into database values.
+        
+        Processes terraform outputs and adds them to database values,
+        skipping any keys in output_skip_keys.
+        """
+        try:
+            outputs = self.tfstate_values["outputs"]
+        except KeyError:
+            return
+
+        if not outputs:
+            return
+
+        # Add outputs to db_values
+        for key, value in outputs.items():
+            # Skip certain keys
+            if key in self.output_skip_keys:
+                continue
+
+            # Warning if key already exists
+            if key in self.db_values:
+                print(f'Output key "{key}" exists but will be clobbered')
+
+            self.db_values[key] = value['value']
+
+    def get(self):
+        """
+        Process Terraform state and return filtered database values.
+        
+        Returns:
+            dict: The processed and filtered database values
+        """
+        self._init_filter_params()
+        self._insert_outputs()
+
+        if self.terraform_type:
+            self._apply_include_keys()
+        else:
+            print("Need to add terraform_type to apply include keys")
+
+        self._apply_map_keys()
+        self._apply_remove_keys()
+
+        return self.db_values
