@@ -200,7 +200,7 @@ class TFExecShellHelper(ResourceCmdHelper, Config0SettingsEnvVarHelper, Configur
         elif self.method in ["validate", "check", "pre-create"]:
             self.build_method = "lambda"
         elif os.environ.get("USE_AWS", True):  # select codebuild or lambda
-            if int(self.build_timeout) > 600:
+            if int(self.build_timeout) > 800:
                 self.build_method = "codebuild"
             else:
                 self.build_method = "lambda"
