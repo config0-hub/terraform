@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+"""
+Terraform Execution Wrapper for Config0
+
+This module provides a wrapper around Terraform operations, executing them through
+AWS Lambda or CodeBuild. It handles configuration management, environment variable setup,
+state file management, and command execution for Terraform operations like create,
+destroy, validate, and check.
+
+The module uses Config0's resource management system to handle inputs, manage state,
+and coordinate execution across AWS services.
+"""
+
+# Copyright 2025 Gary Leong gary@config0.com
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import os
+
+from config0_publisher.loggerly import Config0Logger
+from config0_publisher.serialization import b64_decode
+from config0_publisher.resource.codebuild import Codebuild
+from config0_publisher.resource.lambdabuild import Lambdabuild
+from config0_publisher.resource.manage import ResourceCmdHelper
+from config0_publisher.resource.tf_configure import ConfigureTFConfig0Db
+from config0_publisher.resource.tf_vars import tf_iter_to_str, get_tf_bool
+from config0_publisher.resource.config0_settings_env_vars import Config0SettingsEnvVarHelper
+
+
+class TFExecShellHelper(ResourceCmdHelper, Config0SettingsEnvVarHelper, ConfigureTFConfig0Db):
+    """Helper class for executing Terraform commands via AWS Lambda or CodeBuild"""
+
+    def __init__(self):
+        self.classname = 'TerraformWrapper'
+        self.logger = Config0Logger(self.classname, logcategory="cloudprovider")
+        self.logger.debug(f"Instantiating {self.classname}")
+        self.method = os.environ.get("METHOD", "create")
+
+        ConfigureTFConfig0Db.__init__(self)
+
+        # Main input settings from environment var CONFIG0_RESOURCE_EXEC_SETTINGS_HASH
+        Config0SettingsEnvVarHelper.__init__(self)
+        self.eval_config0_resource_settings(self.method)
+
+        set_must_exists = [
+            "tmp_bucket",
+            "log_bucket"
+        ]
+
+        set_default_values = {
+            "failed_destroy": None,
+            "create_remote_state": None,
+            "tf_runtime_env_vars": None,
+            "ssm_name": None
+        }
+
+        if self.method == "create":
+            set_must_exists.extend([
+                "ssm_name",
+                "stateful_id", 
+                "remote_stateful_bucket"
+            ])
+            set_default_values["create_remote_state"] = True
+
+        ResourceCmdHelper.__init__(
+            self,
+            main_env_var_key="TF_RUNTIME_SETTINGS",
+            app_name="terraform",
+            set_must_exists=set_must_exists,
+            set_default_values=set_default_values
+        )
+
+        self._apply_tf_runtime_env_vars()
+        self.terraform_tfvars = os.path.join(self.exec_dir, "terraform.tfvars")
+
+    def _apply_tf_runtime_env_vars(self):
+        """Applies Terraform runtime environment variables"""
+
+        if hasattr(self, "tf_runtime_env_vars") and self.tf_runtime_env_vars:
+            for _k, _v in self.tf_runtime_env_vars.items():
+                self.runtime_env_vars[_k.upper()] = _v
+
+    #############################################
+    # insert back to 3531543
+    #############################################
+
+def usage():
+    """Prints usage information"""
+    print("""
+script + environmental variables
+
+basic:
+    main environment variable
+        CONFIG0_RESOURCE_SETTINGS - for creating - it is base64 encoded
+        CONFIG0_BUILD_ENV_VARS - for destroying/validating - it is base64 encoded
+        METHOD - This needs to be set
+    """)
+
+
+if __name__ == '__main__':
+    main = TFExecShellHelper()
+    main.run()
