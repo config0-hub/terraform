@@ -203,6 +203,9 @@ class TFExecShellHelper(ResourceCmdHelper, Config0SettingsEnvVarHelper, Configur
         elif os.environ.get("CONFIG0_BUILD_ENV_VARS"):
             cinputargs["build_env_vars"] = b64_decode(os.environ["CONFIG0_BUILD_ENV_VARS"])
 
+        if os.environ.get("CONFIG0_INITIAL_APPLY"):
+            cinputargs["initial_apply"] = True
+
         return cinputargs
 
     def _set_build_method(self):
