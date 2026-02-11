@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+"""
+Terraform Execution Wrapper for Config0
+
+This module provides a wrapper around Terraform operations, executing them through
+AWS Lambda or CodeBuild. It handles configuration management, environment variable setup,
+state file management, and command execution for Terraform operations like create,
+destroy, validate, and check.
+
+The module uses Config0's resource management system to handle inputs, manage state,
+and coordinate execution across AWS services.
+"""
+
+# Copyright 2025 Gary Leong gary@config0.com
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import os
+from config0_publisher.loggerly import Config0Logger
+from config0_publisher.resource.tf_exec_shell_helper_main import TFExecShellHelperMain
+
+class TFExecShellHelper(TFExecShellHelperMain):
+    """Helper class for executing Terraform commands via AWS Lambda or CodeBuild"""
+
+    def __init__(self):
+
+        self.classname = 'TFExecShellHelper'
+
+        TFExecShellHelperMain.__init__(self)
+
+        self.logger = Config0Logger(
+            self.classname,
+            logcategory="cloudprovider"
+        )
+
+    def set_build_method(self):
+        """Determines whether to use CodeBuild or Lambda for execution"""
+
+        if os.environ.get("USE_CODEBUILD"):  # longer than 900 seconds
+            self.build_method = "codebuild"
+        elif os.environ.get("USE_LAMBDA"):  # shorter than 900 seconds
+            self.build_method = "lambda"
+        elif self.method in ["validate", "check"]:
+            self.build_method = "lambda"
+        elif os.environ.get("USE_AWS", True):  # select codebuild or lambda
+            if int(self.build_timeout) > 800:
+                self.build_method = "codebuild"
+            else:
+                self.build_method = "lambda"
+        else:  # the default
+            self.build_method = "lambda"
+
+    def eval_result(self,tf_results):
+
+        """Evaluates the result of Terraform execution"""
+
+        self.logger.debug("#" * 32)
+        self.logger.json(f'tf_results {tf_results}')
+        self.logger.debug("#" * 32)
+
+        return tf_results
+
+    def run(self):
+        """Main execution method"""
+
+        self.set_build_method()
+
+        if self.method == "create":
+            tf_results = self.create()
+        elif self.method == "destroy":
+            tf_results = self.setup_and_exec_in_aws("destroy")
+        elif self.method == "validate":
+            tf_results = self.setup_and_exec_in_aws("validate")
+        elif self.method == "check":
+            tf_results = self.setup_and_exec_in_aws("check")
+        else:
+            usage()
+            print(f'Method "{self.method}" not supported!')
+            exit(4)
+
+        if self.method in ["destroy", "validate", "check"]:
+            if self.async_mode and not tf_results.get("done"):
+                self.write_phases_to_json_file(tf_results)
+            elif self.async_mode and tf_results.get("done"):
+                self.write_resource_to_json_file(tf_results,
+                                                 must_exist=True)
+
+        return self.eval_result(tf_results)
+
+def usage():
+    """Prints usage information"""
+    print("""
+script + environmental variables
+
+basic:
+    main environment variable
+        CONFIG0_RESOURCE_SETTINGS - for creating - it is base64 encoded
+        CONFIG0_BUILD_ENV_VARS - for destroying/validating - it is base64 encoded
+        METHOD - This needs to be set
+    """)
+
+
+if __name__ == '__main__':
+    main = TFExecShellHelper()
+    main.run()
