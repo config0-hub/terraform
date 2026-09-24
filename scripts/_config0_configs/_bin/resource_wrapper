@@ -26,7 +26,6 @@ and coordinate execution across AWS services.
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import os
 from config0_publisher.loggerly import Config0Logger
 from config0_publisher.resource.tf_exec_shell_helper_main import TFExecShellHelperMain
 
@@ -44,23 +43,6 @@ class TFExecShellHelper(TFExecShellHelperMain):
             logcategory="cloudprovider"
         )
 
-    def set_build_method(self):
-        """Determines whether to use CodeBuild or Lambda for execution"""
-
-        if os.environ.get("USE_CODEBUILD"):  # longer than 900 seconds
-            self.build_method = "codebuild"
-        elif os.environ.get("USE_LAMBDA"):  # shorter than 900 seconds
-            self.build_method = "lambda"
-        elif self.method in ["validate", "check"]:
-            self.build_method = "lambda"
-        elif os.environ.get("USE_AWS", True):  # select codebuild or lambda
-            if int(self.build_timeout) > 800:
-                self.build_method = "codebuild"
-            else:
-                self.build_method = "lambda"
-        else:  # the default
-            self.build_method = "lambda"
-
     def eval_result(self,tf_results):
 
         """Evaluates the result of Terraform execution"""
@@ -74,7 +56,7 @@ class TFExecShellHelper(TFExecShellHelperMain):
     def run(self):
         """Main execution method"""
 
-        self.set_build_method()
+        self._ensure_build_method()
 
         if self.method == "create":
             tf_results = self.create()
@@ -93,6 +75,12 @@ class TFExecShellHelper(TFExecShellHelperMain):
             if self.async_mode and not tf_results.get("done"):
                 self.write_phases_to_json_file(tf_results)
             elif self.async_mode and tf_results.get("done"):
+                self.write_resource_to_json_file(tf_results,
+                                                 must_exist=True)
+            elif not self.async_mode:
+                # A synchronous delegated run is terminal on this pass. Carry
+                # its ExecutionResult through the same resource JSON seam used
+                # by async FINALIZE so destroy verification sees identical data.
                 self.write_resource_to_json_file(tf_results,
                                                  must_exist=True)
 
